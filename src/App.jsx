@@ -2,15 +2,28 @@ import { useState } from 'react';
 import { sections, LEVELS } from './data';
 import './App.css';
 
-function TopicRow({ topic, sectionColor }) {
-  const [open, setOpen] = useState(false);
+function highlightText(text, query) {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="search-highlight">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+function TopicRow({ topic, sectionColor, highlight, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   const level = LEVELS[topic.level] || LEVELS['2'];
 
   return (
     <div className="topic-row">
       <button className="topic-header" onClick={() => setOpen(!open)}>
         <span className="topic-chevron">{open ? '▾' : '▸'}</span>
-        <span className="topic-name">{topic.name}</span>
+        <span className="topic-name">{highlight ? highlightText(topic.name, highlight) : topic.name}</span>
         <span className="topic-badges">
           {topic.score != null && (
             <span className="topic-score" title="Оценка">{topic.score}/5</span>
@@ -75,8 +88,8 @@ function FormattedContent({ text }) {
   return <div className="formatted-content">{elements}</div>;
 }
 
-function SectionBlock({ section }) {
-  const [collapsed, setCollapsed] = useState(false);
+function SectionBlock({ section, defaultCollapsed = false }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const topicCount = section.topics.length;
   const scored = section.topics.filter(t => t.score != null);
   const avg = scored.length ? (scored.reduce((a, t) => a + t.score, 0) / scored.length).toFixed(1) : null;
@@ -101,6 +114,46 @@ function SectionBlock({ section }) {
         </div>
       )}
     </div>
+  );
+}
+
+function SearchResults({ query, sections }) {
+  const q = query.toLowerCase();
+  const results = [];
+
+  sections.forEach(section => {
+    const matched = section.topics.filter(t =>
+      t.name.toLowerCase().includes(q) ||
+      (t.content && t.content.toLowerCase().includes(q))
+    );
+    if (matched.length > 0) results.push({ section, topics: matched });
+  });
+
+  if (results.length === 0) {
+    return <p className="search-empty">Ничего не найдено по запросу «{query}»</p>;
+  }
+
+  return (
+    <>
+      {results.map(({ section, topics }) => (
+        <div key={section.id} className="section-block">
+          <div className="section-header" style={{ '--accent': section.color }}>
+            <div className="section-left">
+              <span className="section-icon">{section.icon}</span>
+              <div>
+                <h2 className="section-title">{section.title}</h2>
+                <span className="section-meta">{topics.length} совпадений</span>
+              </div>
+            </div>
+          </div>
+          <div className="section-topics">
+            {topics.map((topic, i) => (
+              <TopicRow key={i} topic={topic} sectionColor={section.color} highlight={query} defaultOpen />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -157,8 +210,11 @@ function FlashcardMode({ sections }) {
 
 export default function App() {
   const [tab, setTab] = useState('roadmap');
+  const [viewMode, setViewMode] = useState('list');
+  const [search, setSearch] = useState('');
 
   const totalTopics = sections.reduce((a, s) => a + s.topics.length, 0);
+  const isSearching = tab === 'roadmap' && search.trim().length > 0;
 
   return (
     <div className="app">
@@ -167,18 +223,70 @@ export default function App() {
           <h1 className="app-title">Frontend Senior+ Roadmap</h1>
           <p className="app-sub">{sections.length} разделов · {totalTopics} тем</p>
         </div>
-        <nav className="tabs">
-          <button className={`tab ${tab === 'roadmap' ? 'active' : ''}`} onClick={() => setTab('roadmap')}>
-            📋 Темы
-          </button>
-          <button className={`tab ${tab === 'cards' ? 'active' : ''}`} onClick={() => setTab('cards')}>
-            🃏 Карточки
-          </button>
-        </nav>
+        <div className="header-controls">
+          <nav className="tabs">
+            <button className={`tab ${tab === 'roadmap' ? 'active' : ''}`} onClick={() => { setTab('roadmap'); setSearch(''); }}>
+              📋 Темы
+            </button>
+            <button className={`tab ${tab === 'cards' ? 'active' : ''}`} onClick={() => { setTab('cards'); setSearch(''); }}>
+              🃏 Карточки
+            </button>
+          </nav>
+          {tab === 'roadmap' && (
+            <div className="view-toggle">
+              <button
+                className={`view-btn ${viewMode === 'list' ? 'active' : ''}`}
+                onClick={() => setViewMode('list')}
+                title="Список"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="2" width="14" height="2" rx="1"/>
+                  <rect x="1" y="7" width="14" height="2" rx="1"/>
+                  <rect x="1" y="12" width="14" height="2" rx="1"/>
+                </svg>
+              </button>
+              <button
+                className={`view-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                onClick={() => setViewMode('grid')}
+                title="Сетка"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="1" width="6" height="6" rx="1"/>
+                  <rect x="9" y="1" width="6" height="6" rx="1"/>
+                  <rect x="1" y="9" width="6" height="6" rx="1"/>
+                  <rect x="9" y="9" width="6" height="6" rx="1"/>
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+        {tab === 'roadmap' && (
+          <div className="search-bar">
+            <svg className="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.868-3.834zm-5.242 1.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+            </svg>
+            <input
+              type="search"
+              placeholder="Поиск по темам..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="search-input"
+            />
+            {search && (
+              <button className="search-clear" onClick={() => setSearch('')} title="Очистить">✕</button>
+            )}
+          </div>
+        )}
       </header>
-      <main className="app-main">
+      <main key={isSearching ? `search-${search}` : viewMode} className={`app-main ${tab === 'roadmap' && !isSearching && viewMode === 'grid' ? 'view-grid' : ''}`}>
         {tab === 'roadmap' ? (
-          sections.map(section => <SectionBlock key={section.id} section={section} />)
+          isSearching ? (
+            <SearchResults query={search.trim()} sections={sections} />
+          ) : (
+            sections.map(section => (
+              <SectionBlock key={section.id} section={section} defaultCollapsed={viewMode === 'grid'} />
+            ))
+          )
         ) : (
           <FlashcardMode sections={sections} />
         )}
