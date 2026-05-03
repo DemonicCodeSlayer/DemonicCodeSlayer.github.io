@@ -233,7 +233,35 @@ Admin.__proto__ === User                     // для статики
 • В методе — обращается к методу родительского прототипа
 • Без super() в дочернем конструкторе — ReferenceError при обращении к this
 
-**User.prototype** по умолчанию = \`{ constructor: User }\``,
+**User.prototype** по умолчанию = \`{ constructor: User }\`
+
+**Приватные методы:**
+\`\`\`js
+class User {
+  #name;
+  constructor(name) { this.#name = name; }
+  #validate() { return this.#name.length > 0; }
+  getName() { return this.#validate() ? this.#name : null; }
+}
+\`\`\`
+
+**Порядок инициализации полей:**
+1. Поля родителя (class fields)
+2. Конструктор родителя (super())
+3. Поля дочернего класса
+4. Конструктор дочернего класса
+
+**Mixin-паттерн** (псевдо-множественное наследование):
+\`\`\`js
+const Serializable = (Base) => class extends Base {
+  serialize() { return JSON.stringify(this); }
+};
+const Validatable = (Base) => class extends Base {
+  validate() { return Object.values(this).every(v => v !== null); }
+};
+class User extends Serializable(Validatable(EventEmitter)) { ... }
+\`\`\`
+Каждый mixin — функция (Base) => class extends Base. Цепочка прототипов линейна, нет diamond problem.`,
         score: 3.5,
       },
       {
@@ -301,7 +329,25 @@ for...in                // включая прототип
 Object.keys()           // только собственные
 \`\`\`
 
-**Конец цепочки:** Object.prototype → null`,
+**Конец цепочки:** Object.prototype → null
+
+**Object.create():**
+\`\`\`js
+// Создать объект с конкретным прототипом
+const animal = { breathe() { return true; } };
+const dog = Object.create(animal);
+dog.bark = () => 'Woof';
+Object.getPrototypeOf(dog) === animal; // true
+
+// Объект без прототипа — чистый hash map (нет toString, hasOwnProperty и т.д.)
+const map = Object.create(null);
+map['key'] = 'value'; // никогда не конфликтует с prototype методами
+\`\`\`
+
+**Object.getPrototypeOf vs __proto__:**
+\`__proto__\` — устаревший геттер/сеттер на Object.prototype.
+\`Object.getPrototypeOf(obj)\` — стандартный API, используй его.
+\`Object.setPrototypeOf(obj, proto)\` — изменить прототип у существующего объекта. Избегай в горячем коде: переводит объект в slow mode (V8 сбрасывает Hidden Class).`,
         score: 4,
       },
       {
@@ -467,7 +513,27 @@ new Proxy(target, {
 • **receiver** — правильно передаёт this в геттерах/сеттерах
 • Без Reflect: \`target[prop]\` может дать неправильный this
 
-**Практика:** Vue 3 (реактивность), MobX, Immer (Redux Toolkit).`,
+**Практика:** Vue 3 (реактивность), MobX, Immer (Redux Toolkit).
+
+**Proxy.revocable():**
+\`\`\`js
+const { proxy, revoke } = Proxy.revocable(target, handler);
+revoke(); // proxy становится мёртвым → TypeError на любую операцию
+\`\`\`
+Кейс: временный доступ к объекту (capability-based security), после revoke все ссылки бесполезны.
+
+**Инварианты Proxy:**
+Proxy не может нарушать объектную модель JS. Если свойство \`non-configurable + non-writable\`, get-ловушка ОБЯЗАНА вернуть то же значение что в target — иначе TypeError. Движок принудительно проверяет это.
+
+**Полезные ловушки (трапы):**
+\`\`\`js
+{
+  ownKeys(target) { ... },          // Object.keys(), for...in
+  defineProperty(target, key, desc) { ... }, // Object.defineProperty
+  getOwnPropertyDescriptor(target, key) { ... },
+  has(target, prop) { ... },        // in оператор
+}
+\`\`\``,
         score: 3,
       },
     ],
@@ -478,11 +544,45 @@ new Proxy(target, {
     icon: '🌐',
     color: '#4FC3F7',
     topics: [
-      { name: 'devTools (network, application)', level: '2', content: `**Network:** мониторинг HTTP-запросов, время загрузки, размеры, заголовки, тело ответа. Фильтрация по типу (XHR, JS, CSS, Img). Throttling (3G, offline).\n\n**Application:** cookies, localStorage, sessionStorage, IndexedDB, Service Workers, Cache Storage, Manifests.\n\n**Performance:** запись и анализ производительности, flame chart, CPU profiling.\n\n**Elements:** DOM-дерево, стили, computed styles, box model.\n\n**Console:** логирование, выполнение JS, фильтрация по уровням.` },
+      { name: 'devTools (network, application)', level: '2', content: `**Network:** мониторинг HTTP-запросов, время загрузки, размеры, заголовки, тело ответа. Фильтрация по типу (XHR, JS, CSS, Img). Throttling (3G, offline).\n\n**Application:** cookies, localStorage, sessionStorage, IndexedDB, Service Workers, Cache Storage, Manifests.\n\n**Performance:** запись и анализ производительности, flame chart, CPU profiling.\n\n**Elements:** DOM-дерево, стили, computed styles, box model.\n\n**Console:** логирование, выполнение JS, фильтрация по уровням.
+
+**Memory:** heap snapshots (сравнивать до/после — найти утечки), allocation timeline (что создаётся и удерживается), retained size — реальная память с учётом удерживаемых объектов.
+
+**Coverage:** показывает % неиспользуемого JS/CSS при загрузке страницы. Помогает найти что вынести в lazy-load.
+
+**Local Overrides:** редактировать файлы сайта прямо в DevTools — изменения переживают перезагрузку страницы. Удобно для экспериментов без локального сервера.
+
+**Recorder:** запись пользовательских сценариев → воспроизведение → экспорт в Playwright/Puppeteer скрипты.` },
       { name: 'breakpoints', level: '2', content: `**Типы breakpoints в DevTools:**\n\n• **Line breakpoint** — пауза на конкретной строке кода\n• **Conditional breakpoint** — срабатывает при условии (\`user.id === 5\`)\n• **DOM breakpoint** — при изменении DOM-узла (subtree, attributes, node removal)\n• **XHR/Fetch breakpoint** — при запросе к определённому URL\n• **Event listener breakpoint** — при определённом событии (click, scroll)\n• **Exception breakpoint** — при выбросе исключения\n\n**Отладка:** Step over (F10), Step into (F11), Step out (Shift+F11), Resume (F8).\n\n**Watch expressions** — отслеживание переменных. **Call Stack** — стек вызовов. **Scope** — текущие переменные.` },
       { name: 'Всплытие и погружение событий', level: '2', content: `**3 фазы события:**\n1. **Capturing (погружение)** — от window вниз к целевому элементу\n2. **Target** — событие на целевом элементе\n3. **Bubbling (всплытие)** — от целевого элемента вверх к window\n\n\`\`\`js\nel.addEventListener('click', handler, true);  // capturing\nel.addEventListener('click', handler, false); // bubbling (по умолчанию)\n\`\`\`\n\n**event.stopPropagation()** — останавливает всплытие/погружение\n**event.stopImmediatePropagation()** — + отменяет остальные обработчики на этом элементе\n**event.preventDefault()** — отменяет действие по умолчанию (НЕ останавливает всплытие)\n\n**Делегирование событий:** вешаем один обработчик на родителя, проверяем \`event.target\`.` },
       { name: 'Основные браузерные события', level: '2', content: `**Mouse:** click, dblclick, mousedown, mouseup, mousemove, mouseenter, mouseleave, contextmenu\n**Keyboard:** keydown, keyup, keypress (deprecated)\n**Form:** submit, input, change, focus, blur\n**Document:** DOMContentLoaded, load, beforeunload, unload\n**Scroll/Resize:** scroll, resize\n**Clipboard:** copy, paste, cut\n**Touch:** touchstart, touchmove, touchend\n**Drag:** dragstart, drag, dragend, dragover, drop\n\n**DOMContentLoaded** — DOM готов, стили/картинки могут ещё грузиться\n**load** — всё загружено (включая картинки, стили)\n\n**Passive listeners:** \`{ passive: true }\` — обработчик не вызовет preventDefault(), браузер может оптимизировать скролл.` },
-      { name: 'Что такое DOM. JS Методы работы с узлами', level: '2', content: `**DOM (Document Object Model)** — древовидное представление HTML-документа. Каждый HTML-тег — узел (node).\n\n**Поиск:**\n\`\`\`js\ndocument.getElementById('id')\ndocument.querySelector('.class')      // первый\ndocument.querySelectorAll('.class')   // все (статическая коллекция)\ndocument.getElementsByClassName()     // живая коллекция\n\`\`\`\n\n**Создание/модификация:**\n\`\`\`js\ndocument.createElement('div')\nelement.append(child)      // в конец\nelement.prepend(child)     // в начало\nelement.before(sibling)    // перед\nelement.after(sibling)     // после\nelement.remove()           // удалить\nelement.cloneNode(true)    // глубокое клонирование\n\`\`\`\n\n**Атрибуты:** getAttribute, setAttribute, removeAttribute, dataset (data-*).\n**Классы:** classList.add, remove, toggle, contains.` },
+      { name: 'Что такое DOM. JS Методы работы с узлами', level: '2', content: `**DOM (Document Object Model)** — древовидное представление HTML-документа. Каждый HTML-тег — узел (node).\n\n**Поиск:**\n\`\`\`js\ndocument.getElementById('id')\ndocument.querySelector('.class')      // первый\ndocument.querySelectorAll('.class')   // все (статическая коллекция)\ndocument.getElementsByClassName()     // живая коллекция\n\`\`\`\n\n**Создание/модификация:**\n\`\`\`js\ndocument.createElement('div')\nelement.append(child)      // в конец\nelement.prepend(child)     // в начало\nelement.before(sibling)    // перед\nelement.after(sibling)     // после\nelement.remove()           // удалить\nelement.cloneNode(true)    // глубокое клонирование\n\`\`\`\n\n**Атрибуты:** getAttribute, setAttribute, removeAttribute, dataset (data-*).\n**Классы:** classList.add, remove, toggle, contains.
+
+**DocumentFragment** — лёгкий узел вне DOM. Добавляй элементы пакетно, потом вставь один раз → один reflow:
+\`\`\`js
+const frag = document.createDocumentFragment();
+items.forEach(item => {
+  const li = document.createElement('li');
+  li.textContent = item;
+  frag.appendChild(li);
+});
+list.appendChild(frag); // единственный reflow
+\`\`\`
+
+**MutationObserver** — следит за изменениями в DOM (замена устаревшего MutationEvents):
+\`\`\`js
+const observer = new MutationObserver((mutations) => {
+  mutations.forEach(m => console.log(m.type, m.addedNodes, m.attributeName));
+});
+observer.observe(element, {
+  childList: true,    // добавление/удаление дочерних узлов
+  subtree: true,      // всё поддерево
+  attributes: true,   // изменения атрибутов
+  characterData: true // изменения текстового контента
+});
+observer.disconnect();
+\`\`\`
+Используется в: React DevTools, rich text редакторах, analytics трекерах.` },
       { name: 'iframe', level: '3', content: `**iframe** — встраивает другую HTML-страницу внутрь текущей.\n\n\`\`\`html\n<iframe src="https://example.com" sandbox="allow-scripts"></iframe>\n\`\`\`\n\n**Безопасность:**\n• **sandbox** — ограничивает возможности: allow-scripts, allow-same-origin, allow-forms, allow-popups\n• **Same-Origin Policy** — доступ к содержимому iframe только с того же домена\n• **postMessage** — безопасное общение между окнами разных доменов\n\n\`\`\`js\n// Родитель → iframe\niframe.contentWindow.postMessage(data, 'https://target.com');\n\n// iframe → родитель\nwindow.parent.postMessage(data, 'https://parent.com');\n\n// Приём\nwindow.addEventListener('message', (e) => {\n  if (e.origin !== 'https://trusted.com') return;\n  console.log(e.data);\n});\n\`\`\`\n\n**X-Frame-Options** — заголовок, запрещающий встраивание сайта в iframe.` },
       { name: 'Отладка WebSocket в браузере', level: '3', content: `В DevTools → Network → вкладка **WS** (WebSocket):\n• Видны все WebSocket-соединения\n• **Messages** — отправленные (зелёные) и полученные (красные) сообщения\n• **Headers** — заголовки handshake (Upgrade: websocket)\n• **Timing** — время установки соединения\n\nМожно фильтровать по содержимому сообщений, видеть бинарные данные. Полезно для дебага real-time приложений (чаты, уведомления, торговые платформы).` },
       { name: 'Базовое понимание cookies', level: '3', content: `**Cookies** — маленькие текстовые данные, отправляемые с каждым HTTP-запросом.\n\n\`\`\`js\ndocument.cookie = "name=value; max-age=3600; path=/; secure; samesite=strict";\n\`\`\`\n\n**Атрибуты:**\n• **max-age / expires** — время жизни\n• **path** — для какого пути доступна\n• **domain** — для какого домена\n• **secure** — только по HTTPS\n• **httpOnly** — недоступна из JS (защита от XSS)\n• **SameSite** — strict/lax/none (защита от CSRF)\n\n**Ограничения:** ~4KB на cookie, ~20 cookies на домен.\n\n**Типы:** Session cookies (без max-age, до закрытия браузера), Persistent (с max-age), Third-party (с другого домена — для трекинга).` },
@@ -504,7 +604,31 @@ new Proxy(target, {
     topics: [
       { name: 'Компоненты, свойства: Props, State, однонаправленный поток данных', level: '2', content: `**Однонаправленный поток:** данные (props) текут сверху вниз. Обратно — через колбэки.\n\n**Props** — неизменяемы (read-only), передаются от родителя.\n**State** — принадлежит компоненту, изменяется через setter, вызывает ререндер.\n\n**Ререндер дочерних:** по умолчанию ВСЕ дети ререндерятся при ререндере родителя. React.memo — предотвращает, если props не изменились.\n\n**Ловушка с memo + колбэками:** новая функция каждый ререндер → новая ссылка → memo бесполезен. Решение: useCallback.`, score: 4.5 },
       { name: 'Особенности синтаксиса JSX', level: '2', content: `**JSX → React.createElement(type, props, children) → объект (React-элемент)**\n\n\`className\` вместо \`class\` (зарезервированное слово), \`htmlFor\` вместо \`for\`.\n\nВ React 17+ — \`_jsx()\` вместо createElement, не нужен \`import React\`.`, score: 4 },
-      { name: 'Хуки: встроенные и пользовательские', level: '2', content: `**useState** — состояние компонента\n**useEffect** — побочные эффекты (API, подписки)\n**useMemo** — мемоизация результата вычисления\n**useCallback** — мемоизация функции (= useMemo(() => fn, deps))\n**useRef** — ссылка на DOM / хранение данных без ререндера\n**useContext** — потребление контекста\n**useReducer** — сложное состояние (как мини-Redux)\n**useTransition** — низкоприоритетные обновления\n\n**Правила хуков:**\n1. Только на верхнем уровне (не в if/for/вложенных функциях)\n2. Префикс \`use\`\nReact запоминает хуки по **порядку вызова**.`, score: 4 },
+      { name: 'Хуки: встроенные и пользовательские', level: '2', content: `**useState** — состояние компонента\n**useEffect** — побочные эффекты (API, подписки)\n**useMemo** — мемоизация результата вычисления\n**useCallback** — мемоизация функции (= useMemo(() => fn, deps))\n**useRef** — ссылка на DOM / хранение данных без ререндера\n**useContext** — потребление контекста\n**useReducer** — сложное состояние (как мини-Redux)\n**useTransition** — помечает обновление как низкоприоритетное (UI не зависает при тяжёлых ререндерах)
+**useLayoutEffect** — как useEffect, но синхронно после мутации DOM до отрисовки. Для измерения DOM и предотвращения визуального мерцания. Стоит дороже useEffect.
+**useId** — стабильный уникальный ID для пары label/input. Решает проблему гидратации при SSR:
+\`\`\`js
+const id = useId();
+return <><label htmlFor={id}>Name</label><input id={id} /></>;
+\`\`\`
+**useImperativeHandle(ref, () => api, deps)** — выставить наружу только нужные методы:
+\`\`\`js
+const Input = forwardRef((props, ref) => {
+  const inputRef = useRef();
+  useImperativeHandle(ref, () => ({
+    focus: () => inputRef.current.focus(),
+    clear: () => { inputRef.current.value = ''; }
+  }));
+  return <input ref={inputRef} />;
+});
+// Родитель: ref.current.focus() — только выставленное API
+\`\`\`
+**useSyncExternalStore(subscribe, getSnapshot)** — подписка на внешние сторы с поддержкой Concurrent Mode. Именно так работают Zustand, Redux Toolkit, Jotai.
+
+**Правила хуков:**
+1. Только на верхнем уровне (не в if/for/вложенных функциях)
+2. Префикс \`use\`
+React запоминает хуки по **порядку вызова**.`, score: 4 },
       { name: 'Жизненный цикл компонента', level: '2', content: `**3 фазы:** Mounting → Updating → Unmounting\n\n**useEffect маппинг:**\n\`\`\`js\nuseEffect(() => { ... }, []);     // componentDidMount\nuseEffect(() => { ... }, [dep]);  // componentDidUpdate (для dep)\nuseEffect(() => {\n  return () => { ... };           // componentWillUnmount\n}, []);\n\`\`\`\n\n**shouldComponentUpdate** → React.memo (для функциональных).`, score: 4 },
       { name: 'Фрагменты', level: '2', content: `Группировка без лишнего DOM-узла: \`<Fragment>\` или \`<>...</>\`.\n\n\`<>\` — нельзя передать key. \`<Fragment key={id}>\` — можно. Единственный случай для полного Fragment — списки.`, score: 5 },
       { name: 'Компоненты высшего порядка', level: '3', content: `**HOC** — функция, принимающая компонент → возвращающая новый с расширенной функциональностью.\n\n\`\`\`jsx\nfunction withAuth(Component) {\n  return function(props) {\n    if (!useAuth()) return <Redirect to="/login" />;\n    return <Component {...props} />;\n  };\n}\nconst ProtectedPage = withAuth(Dashboard);\n\`\`\`\n\nHOC не изменяет оригинальный компонент, а оборачивает. Сейчас заменён хуками.`, score: 4 },
@@ -514,7 +638,43 @@ new Proxy(target, {
       { name: 'Порталы и как ими пользоваться', level: '3', content: `\`\`\`jsx\nimport { createPortal } from 'react-dom';\ncreatePortal(<Modal />, document.getElementById('modal-root'));\n\`\`\`\n\nМонтирует в другой DOM-узел, но события всплывают по **React-дереву** (не DOM-дереву).`, score: 4 },
       { name: 'React Context', level: '3', content: `Решает **prop drilling**. createContext → Provider (value) → useContext.\n\n**Проблема:** изменение value → ВСЕ подписчики ререндерятся. React.memo НЕ помогает (контекст обходит memo).\n\n**Решение:** разделить на отдельные контексты (UserContext, ThemeContext).`, score: 4.5 },
       { name: 'Концепция SSR. Ограничения применения', level: '3', content: `Сервер рендерит HTML → браузер показывает сразу → **гидратация** (навешивает обработчики).\n\n**API:**\n• \`createRoot\` — CSR (пустой DOM)\n• \`hydrateRoot\` — SSR (DOM с контентом)\n• \`renderToString\` — синхронный (старый)\n• \`renderToPipeableStream\` — потоковый (React 18, Streaming SSR)\n\n**Плюсы:** SEO, быстрый FCP.\n**Минусы:** нет window/document, увеличенный TTFB, нагрузка на сервер.`, score: 3.5 },
-      { name: 'Form managers', level: '3', content: `**React Hook Form** — неконтролируемые компоненты + useRef. Минимум ререндеров.\n**Formik** — контролируемые компоненты. Каждое нажатие → ререндер.\n\nReact Hook Form + **Zod/Yup** — валидация по схеме с выводом типов.`, score: 3 },
+      { name: 'Form managers', level: '3', content: `**Контролируемые компоненты:** значение в state, React управляет вводом. Каждый keystroke → setState → ререндер.
+\`\`\`jsx
+const [value, setValue] = useState('');
+<input value={value} onChange={e => setValue(e.target.value)} />
+\`\`\`
+**Неконтролируемые компоненты:** DOM хранит значение, React читает через ref когда нужно.
+\`\`\`jsx
+const ref = useRef();
+<input ref={ref} defaultValue="initial" />
+// При сабмите: ref.current.value
+\`\`\`
+
+**React Hook Form** — неконтролируемые + \`register\`. Минимум ререндеров, высокая производительность.
+**Formik** — контролируемые. Каждое нажатие → ререндер. Хорош для простых форм.
+
+**Валидация схемами:**
+\`\`\`js
+const schema = z.object({
+  email: z.string().email(),
+  age: z.number().min(18)
+});
+const { register, handleSubmit, formState: { errors } } = useForm({
+  resolver: zodResolver(schema)
+});
+\`\`\`
+
+**React 19 — Server Actions:**
+\`\`\`jsx
+// Форма с серверным экшном — без useState/fetch
+<form action={async (formData) => {
+  'use server';
+  await saveUser(formData.get('name'));
+  revalidatePath('/users');
+}}>
+  <input name="name" /><button>Save</button>
+</form>
+\`\`\``, score: 3 },
       { name: 'React паттерны. Compound components. render-props', level: '4', content: `**Compound Components:** набор связанных компонентов через Context.\n\`\`\`jsx\n<Table>\n  <Table.Header><Table.Cell>Name</Table.Cell></Table.Header>\n  <Table.Row><Table.Cell>Alice</Table.Cell></Table.Row>\n</Table>\n\`\`\`\n\n**Render-props:** компонент принимает функцию для рендеринга.\n\`\`\`jsx\n<MouseTracker render={({ x, y }) => <p>{x}, {y}</p>} />\n\`\`\`\n\nОба паттерна в основном заменены хуками (проще, без wrapper hell).`, score: 3.5 },
       { name: 'Механизм Reconciliation', level: '4', content: `Алгоритм сравнения Virtual DOM деревьев O(n):\n\n1. **Разный тип** → уничтожить поддерево, создать заново (включая state)\n2. **Одинаковый тип DOM** → обновить атрибуты\n3. **Одинаковый тип компонента** → обновить props, вызвать render\n4. **Списки** → key для сопоставления\n\n**Одинаковый key** → warning + баги со стейтом. **index как key** → лишние ререндеры при вставке/удалении.`, score: 4 },
       { name: 'Архитектура Fiber', level: '4', content: `**Fiber** — структура данных (узел) для каждого компонента. Хранит тип, props, state, ссылки на соседей.\n\n**Проблема до Fiber:** стековый рекурсивный обход — нельзя прервать, UI зависает.\n\n**Решение:** работа делится на маленькие units of work, можно прервать и возобновить.\n\n**useTransition** — помечает обновление как низкоприоритетное. React может прервать при срочном обновлении.\n\n**useDeferredValue** — аналог, но для значения. 
@@ -530,7 +690,31 @@ new Proxy(target, {
 Нельзя прервать — DOM должен обновиться атомарно
 
 Именно поэтому функции в render фазе (например тело компонента) могут вызываться несколько раз — Fiber может перезапустить работу. Это причина почему в StrictMode React намеренно вызывает рендер дважды.`, score: 4 },
-      { name: 'Server components', level: '4', content: `Код остаётся на сервере, JS НЕ отправляется клиенту. Нет гидратации.\n\n**\`'use client'\`** — маркер клиентского компонента. Остальное — серверное по умолчанию.\n\n**RSC Payload:** серверные компоненты → готовая разметка, клиентские → ссылки из бандла.\n\n**Ограничения SC:** нет useState/useEffect, нет обработчиков событий, нет интерактивности.\n\n**Плюс:** тяжёлые библиотеки не попадают в бандл клиента. Прямой доступ к БД, файловой системе.`, score: 4 },
+      { name: 'Server components', level: '4', content: `Код остаётся на сервере, JS НЕ отправляется клиенту. Нет гидратации.\n\n**\`'use client'\`** — маркер клиентского компонента. Остальное — серверное по умолчанию.\n\n**RSC Payload:** серверные компоненты → готовая разметка, клиентские → ссылки из бандла.\n\n**Ограничения SC:** нет useState/useEffect, нет обработчиков событий, нет интерактивности.\n\n**Плюс:** тяжёлые библиотеки не попадают в бандл клиента. Прямой доступ к БД, файловой системе.
+
+**Server Actions (React 19 / Next.js 14+):**
+\`\`\`js
+// actions.ts
+'use server';
+export async function createUser(formData: FormData) {
+  await db.insert({ name: formData.get('name') });
+  revalidatePath('/users'); // инвалидировать кэш
+}
+\`\`\`
+\`\`\`jsx
+// Серверный компонент — нет JS на клиенте
+<form action={createUser}>
+  <input name="name" />
+  <button>Создать</button>
+</form>
+
+// Или из клиентского компонента
+const [isPending, startTransition] = useTransition();
+startTransition(async () => { await createUser(formData); });
+\`\`\`
+- Выполняются на сервере, не попадают в бандл
+- Поддерживают optimistic updates через \`useOptimistic\`
+- Интегрируются с Suspense и streaming`, score: 4 },
     ],
   },
 ];
