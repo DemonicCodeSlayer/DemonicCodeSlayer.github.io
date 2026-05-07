@@ -65,7 +65,21 @@ obj.method()              // Reference Type жив → this = obj
 • \`null\` / \`undefined\` → \`window\`
 • Примитив → обёртка: \`7\` → \`Number{7}\`
 
-**Strict mode:** boxing не происходит. Что передал — то и получил.`,
+\`\`\`js
+function foo() { console.log(this); }
+
+// Нестрогий режим:
+foo.call(null);      // this → window
+foo.call(undefined); // this → window
+foo.call(7);         // this → Number {7}  ← boxing!
+foo.call('hi');      // this → String {'hi'} ← boxing!
+
+// Strict mode — boxing не происходит:
+foo.call(7);         // this → 7 (просто примитив)
+foo.call(null);      // this → null
+\`\`\`
+
+**Правило:** нестрогий → null/undefined заменяются на window, примитивы оборачиваются в объект. Строгий → что передал, то и получил.`,
         score: 2.5,
       },
       {
@@ -469,72 +483,186 @@ user.#password; // SyntaxError! Снаружи недоступно
       {
         name: 'Оптимизации в V8: Скрытые классы, Inline Caching',
         level: '4',
-        content: `**Скрытые классы (Hidden Classes / Maps):**
-Описывают форму объекта — какие свойства и по какому смещению в памяти.
+        content: `**Скрытые классы (Hidden Classes)**
+
+**Hashmap** — структура данных "ключ → значение". При чтении \`obj.name\` нужно вычислить хэш строки "name", найти ячейку, разрешить коллизии. Это O(1) в среднем, но с константными накладными расходами на каждое обращение.
+
+V8 не хранит свойства объекта как hashmap — это медленно. Вместо этого он назначает каждому объекту Hidden Class (внутреннее описание формы) — какие свойства есть и по какому смещению в памяти. Тогда \`obj.name\` читается напрямую по смещению — как поле структуры в C, без хэширования.
 
 \`\`\`js
-const user = {};          // Hidden Class C0
-user.name = 'Alice';      // → C1: { name: offset 0 }
-user.age = 25;            // → C2: { name: offset 0, age: offset 8 }
+const user = {};        // Hidden Class C0: {}
+user.name = 'Alice';    // → C1: { name: offset 0 }
+user.age = 25;          // → C2: { name: offset 0, age: offset 8 }
 \`\`\`
 
-Одинаковый порядок свойств → один Hidden Class → переиспользование оптимизаций.
+Два объекта с **одинаковым порядком добавления свойств** разделяют один Hidden Class → V8 переиспользует оптимизации для обоих.
 
-**delete** — часто переводит в dictionary mode (slow mode). Вместо delete → \`= undefined\`.
+\`\`\`js
+// ✅ Оба получат один Hidden Class C2
+const a = {}; a.x = 1; a.y = 2;
+const b = {}; b.x = 5; b.y = 10;
 
-**Inline Caching:**
-• Monomorphic (1 форма) → максимально быстро
-• Polymorphic (2-4) → медленнее
-• Megamorphic (5+) → кэш бесполезен
+// ❌ Разные Hidden Classes — разный порядок свойств
+const c = {}; c.x = 1; c.y = 2;
+const d = {}; d.y = 2; d.x = 1;
+\`\`\`
 
-**Глобальные переменные медленнее:**
-1. Длинный путь по outer
-2. Нет оптимизации через регистры CPU
-3. Нестабильная форма глобального объекта`,
+**Практика:** инициализировать все свойства в конструкторе в одинаковом порядке. Динамическое добавление свойств в разном порядке дробит оптимизации.
+
+**delete — опасен:**
+Удаление свойства переводит объект в **dictionary mode** (slow mode) — V8 переходит на настоящий hashmap, теряет скрытый класс. Вместо delete → присвой \`undefined\` или \`null\`.
+
+---
+
+**Inline Caching (IC)**
+
+IC — оптимизация на уровне JIT. Каждый раз когда V8 впервые выполняет операцию вроде \`obj.prop\`, он не знает что там внутри — и делает полный поиск. Но он запоминает: "здесь был объект с Hidden Class C2, свойство prop — на смещении 8". При следующем вызове просто проверяет класс и читает по смещению — без хэширования, без поиска.
+
+Проблема возникает когда в одно и то же место кода приходят объекты **разных форм**. V8 должен хранить кэш для каждой встреченной формы — и с каждой новой формой кэш становится дороже:
+
+\`\`\`js
+function getX(obj) { return obj.x; }
+
+getX({ x: 1 });           // 1-я форма → IC: Uninitialized → Monomorphic
+getX({ x: 2, y: 3 });     // 2-я форма → IC: Monomorphic → Polymorphic
+getX({ a: 1, x: 4 });     // 3-я форма → IC: Polymorphic (растёт)
+// ... 5+ форм → Megamorphic: кэш выброшен, каждый вызов — полный поиск
+\`\`\`
+
+Стадии — это не настройки, а **состояние кэша**. V8 сам переводит IC вперёд по мере того как видит новые формы:
+
+- **Uninitialized** — функция ещё не вызывалась
+- **Monomorphic** — одна форма → максимально быстро, кэш из одной записи
+- **Polymorphic** — 2–4 формы → кэш на несколько вариантов, сравниваются линейно
+- **Megamorphic** — 5+ форм → кэш выброшен, V8 ходит в глобальную хэш-таблицу
+
+**Назад IC не откатывается.** Функция ставшая Megamorphic остаётся такой до следующей перекомпиляции — V8 переключается обратно на hashmap (полный поиск по хэшу при каждом обращении), теряя все преимущества скрытых классов. Поэтому утилитарные функции которые принимают любые объекты (lodash, Object.assign) сознательно написаны так чтобы не полагаться на IC.`,
         score: 3.5,
       },
       {
         name: 'Proxy и Reflect',
         level: '4',
-        content: `**Proxy** — обёртка, перехватывающая операции с объектом:
+        content: `**Proxy** — обёртка вокруг объекта, которая перехватывает операции над ним. Сам объект не меняется — ты работаешь с прокси, а прокси решает что делать дальше.
+
 \`\`\`js
-new Proxy(target, {
-  get(target, prop, receiver) { ... },
-  set(target, prop, value, receiver) { ... },
-  deleteProperty(target, prop) { ... },
-  has(target, prop) { ... },     // оператор in
-  apply(target, thisArg, args) { ... }, // вызов функции
-  construct(target, args) { ... },      // new
-});
+const handler = {
+  get(target, prop, receiver) {
+    console.log(\`читаем \${prop}\`);
+    return Reflect.get(target, prop, receiver); // стандартное поведение
+  },
+  set(target, prop, value, receiver) {
+    if (typeof value !== 'number') throw new TypeError('только числа');
+    return Reflect.set(target, prop, value, receiver);
+  },
+};
+
+const proxy = new Proxy({}, handler);
+proxy.x = 42;   // OK
+proxy.x = 'hi'; // TypeError
 \`\`\`
 
-**Reflect** — стандартный способ выполнить операцию по умолчанию:
-• Единообразие — метод для каждой ловушки
-• **receiver** — правильно передаёт this в геттерах/сеттерах
-• Без Reflect: \`target[prop]\` может дать неправильный this
+**Полный список ловушек** (каждая перехватывает свою операцию):
+\`\`\`js
+get(target, prop, receiver)              // obj.prop
+set(target, prop, value, receiver)       // obj.prop = value
+has(target, prop)                        // 'prop' in obj
+deleteProperty(target, prop)             // delete obj.prop
+apply(target, thisArg, args)             // fn()
+construct(target, args)                  // new Fn()
+ownKeys(target)                          // Object.keys(), for...in
+defineProperty(target, key, desc)        // Object.defineProperty
+getOwnPropertyDescriptor(target, key)    // Object.getOwnPropertyDescriptor
+getPrototypeOf(target)                   // Object.getPrototypeOf
+setPrototypeOf(target, proto)            // Object.setPrototypeOf
+isExtensible(target)                     // Object.isExtensible
+preventExtensions(target)                // Object.preventExtensions
+\`\`\`
 
-**Практика:** Vue 3 (реактивность), MobX, Immer (Redux Toolkit).
+---
+
+**Reflect** — зеркало операций JS. Для каждой ловушки Proxy есть соответствующий метод Reflect с той же сигнатурой.
+
+Зачем не просто \`target[prop]\`:
+\`\`\`js
+// ❌ Без Reflect — теряем receiver, this в геттере будет target, а не proxy
+get(target, prop) {
+  return target[prop]; // если prop — геттер, this внутри = target
+}
+
+// ✅ С Reflect — receiver (прокси) правильно передаётся как this
+get(target, prop, receiver) {
+  return Reflect.get(target, prop, receiver);
+}
+\`\`\`
+Это критично когда объект наследует геттеры — без receiver они сломаются.
+
+---
+
+**Инварианты Proxy:**
+Proxy не может нарушать объектную модель JS. Если свойство \`non-configurable + non-writable\`, get-ловушка обязана вернуть то же значение что в target — иначе TypeError. Движок принудительно проверяет это независимо от твоего кода.
 
 **Proxy.revocable():**
 \`\`\`js
 const { proxy, revoke } = Proxy.revocable(target, handler);
-revoke(); // proxy становится мёртвым → TypeError на любую операцию
+revoke(); // proxy мёртв → TypeError на любую операцию
 \`\`\`
-Кейс: временный доступ к объекту (capability-based security), после revoke все ссылки бесполезны.
+Кейс: временный доступ к объекту. После revoke все ссылки на proxy бесполезны — данные не утекут.
 
-**Инварианты Proxy:**
-Proxy не может нарушать объектную модель JS. Если свойство \`non-configurable + non-writable\`, get-ловушка ОБЯЗАНА вернуть то же значение что в target — иначе TypeError. Движок принудительно проверяет это.
-
-**Полезные ловушки (трапы):**
-\`\`\`js
-{
-  ownKeys(target) { ... },          // Object.keys(), for...in
-  defineProperty(target, key, desc) { ... }, // Object.defineProperty
-  getOwnPropertyDescriptor(target, key) { ... },
-  has(target, prop) { ... },        // in оператор
-}
-\`\`\``,
+**Где используется:** Vue 3 реактивность (перехват get/set для отслеживания зависимостей), MobX, валидация данных, логирование, мемоизация.`,
         score: 3,
+      },
+      {
+        name: 'Map, Set, WeakMap, WeakSet',
+        level: '3',
+        content: `**Map** — коллекция ключ-значение. Ключом может быть что угодно (объект, функция, NaN):
+\`\`\`js
+const map = new Map();
+map.set('key', 'value');
+map.set(obj, 42);        // объект как ключ
+map.get('key');          // 'value'
+map.has('key');          // true
+map.delete('key');
+map.size;                // кол-во записей
+
+// Итерация:
+for (const [key, value] of map) { ... }
+map.forEach((value, key) => { ... });
+[...map.keys()], [...map.values()], [...map.entries()]
+\`\`\`
+Map vs Object: Map сохраняет порядок вставки, не имеет прототипных ключей, удобнее для итерации.
+
+**Set** — коллекция уникальных значений:
+\`\`\`js
+const set = new Set([1, 2, 2, 3]); // Set {1, 2, 3}
+set.add(4);
+set.has(2);   // true
+set.delete(2);
+set.size;     // 3
+
+// Удаление дублей из массива:
+const unique = [...new Set(arr)];
+\`\`\`
+
+**WeakMap** — как Map, но:
+• Ключи — только объекты
+• Слабые ссылки — если объект-ключ больше нигде не используется, GC его удалит вместе с записью
+• Нет итерации, нет size
+\`\`\`js
+const cache = new WeakMap();
+cache.set(domNode, computedData); // удалится вместе с domNode
+\`\`\`
+Кейсы: кэш данных привязанный к объекту, приватные данные классов без утечек памяти.
+
+**WeakSet** — как Set, но только объекты, слабые ссылки, нет итерации:
+\`\`\`js
+const seen = new WeakSet();
+seen.add(obj);
+seen.has(obj); // true
+\`\`\`
+Кейс: отмечать объекты как "обработанные" без удержания в памяти.
+
+**Ключевое отличие Weak-версий:** не мешают сборщику мусора — объект удалится как только исчезнут все остальные ссылки на него.`,
+        score: 3.5,
       },
     ],
   },
@@ -632,12 +760,12 @@ React запоминает хуки по **порядку вызова**.`, scor
       { name: 'Жизненный цикл компонента', level: '2', content: `**3 фазы:** Mounting → Updating → Unmounting\n\n**useEffect маппинг:**\n\`\`\`js\nuseEffect(() => { ... }, []);     // componentDidMount\nuseEffect(() => { ... }, [dep]);  // componentDidUpdate (для dep)\nuseEffect(() => {\n  return () => { ... };           // componentWillUnmount\n}, []);\n\`\`\`\n\n**shouldComponentUpdate** → React.memo (для функциональных).`, score: 4 },
       { name: 'Фрагменты', level: '2', content: `Группировка без лишнего DOM-узла: \`<Fragment>\` или \`<>...</>\`.\n\n\`<>\` — нельзя передать key. \`<Fragment key={id}>\` — можно. Единственный случай для полного Fragment — списки.`, score: 5 },
       { name: 'Компоненты высшего порядка', level: '3', content: `**HOC** — функция, принимающая компонент → возвращающая новый с расширенной функциональностью.\n\n\`\`\`jsx\nfunction withAuth(Component) {\n  return function(props) {\n    if (!useAuth()) return <Redirect to="/login" />;\n    return <Component {...props} />;\n  };\n}\nconst ProtectedPage = withAuth(Dashboard);\n\`\`\`\n\nHOC не изменяет оригинальный компонент, а оборачивает. Сейчас заменён хуками.`, score: 4 },
-      { name: 'Virtual DOM', level: '3', content: `**Virtual DOM** — легковесное JS-представление реального DOM.\n\n**Reconciliation (согласование):**\n1. Тип элемента изменился → уничтожить поддерево, строить заново\n2. Тип тот же → обновить только изменённые props/атрибуты\n\n**key** — идентификатор элемента в списке для правильного сопоставления. index как key → баги при вставке/удалении + лишние ререндеры.`, score: 4 },
+      { name: 'Virtual DOM', level: '3', content: `**Зачем нужен Virtual DOM**\n\nПрямые операции с реальным DOM дорогие — каждое изменение может вызвать reflow и repaint. Если при каждом обновлении состояния перерисовывать весь UI через innerHTML, это будет крайне медленно.\n\nVirtual DOM — это легковесный JS-объект, который описывает как должен выглядеть DOM:\n\`\`\`js\n// JSX <div className="box"><p>Hello</p></div>\n// компилируется в:\n{\n  type: 'div',\n  props: { className: 'box' },\n  children: [{ type: 'p', props: {}, children: ['Hello'] }]\n}\n\`\`\`\n\nПри изменении состояния React строит новое дерево VDOM и сравнивает его со старым — это называется **diffing**. В реальный DOM попадают только минимальные изменения.\n\n**Reconciliation — алгоритм сравнения деревьев**\n\nНаивный diff двух деревьев — O(n³). React использует эвристики и делает это за O(n):\n\n**1. Разный тип элемента → снести поддерево и построить заново:**\n\`\`\`jsx\n// было:\n<div><Counter /></div>\n// стало:\n<span><Counter /></span>\n\`\`\`\nReact видит div → span: старый DOM-узел удаляется. Все дочерние компоненты (Counter) вызывают componentWillUnmount / cleanup useEffect. Их state уничтожается. Новое поддерево монтируется с нуля — componentDidMount / useEffect запускаются заново.\n\n**2. Одинаковый тип DOM-элемента → обновить только изменившееся:**\n\`\`\`jsx\n// было: <div className="old" title="x" />\n// стало: <div className="new" />\n\`\`\`\nDOM-узел тот же — React только патчит атрибуты (className меняет, title удаляет). Дочерние компоненты продолжают жить, их state сохраняется — рекурсивно применяется тот же алгоритм.\n\n**2б. Одинаковый тип компонента → обновить props, перерендерить:**\n\`\`\`jsx\n// было: <Counter step={1} />\n// стало: <Counter step={2} />\n\`\`\`\nЭкземпляр компонента тот же — React обновляет props и вызывает рендер. State сохраняется. Запускается useEffect у которого изменились deps.\n\n**3. Списки → React не знает что с чем сопоставить без key:**\n\`\`\`jsx\n// Без key при добавлении в начало React перерисует все элементы\n// С key React знает: этот элемент переместился, а не пересоздался\n[<li key="a">A</li>, <li key="b">B</li>]\n\`\`\`\nС правильным key: компонент переместился → React переиспользует экземпляр, state сохраняется. Без key или с изменившимся key: компонент считается новым → полный unmount + mount, state теряется.\n\n**Почему index как key — антипаттерн:**\n\`\`\`jsx\n// Список: [A(0), B(1), C(2)]\n// Вставили в начало D: [D(0), A(1), B(2), C(3)]\n// React видит: key=0 изменился (был A, стал D) → обновляет\n// Все элементы "изменились" → лишние ререндеры + баги со state инпутов\n\`\`\`\nKey должен быть стабильным уникальным идентификатором из данных (id из БД, slug и т.д.).\n\n**VDOM — не бесплатный:**\nСоздание и сравнение VDOM тоже стоит памяти и CPU. Для очень простых случаев (статичные страницы, частые мелкие обновления) прямые DOM-операции могут быть быстрее. Svelte и Solid.js отказались от VDOM в пользу компиляции в точечные DOM-обновления.`, score: 4 },
       { name: 'Способы оптимизации React-приложения', level: '3', content: `1. **memo/useMemo/useCallback** — мемоизация (применять предметно!)\n2. **React.lazy + Suspense** — code splitting\n3. **Виртуализация списков** — react-window, react-virtualized\n4. **Колокализация стейта** — стейт ближе к месту использования\n5. **Стейт-менеджеры** — точечная подписка на данные`, score: 3.5 },
       { name: 'Предохранители (ErrorBoundary)', level: '3', content: `Классовый компонент, ловит ошибки в рендере и жизненном цикле дочерних.\n\n**НЕ ловит:**\n• Обработчики событий (onClick и т.д.)\n• Асинхронный код (setTimeout, fetch)\n• SSR\n• Ошибки в самом ErrorBoundary\n\nМожно размещать на разных уровнях дерева — если секция упадёт, остальное работает.`, score: 3 },
       { name: 'Порталы и как ими пользоваться', level: '3', content: `\`\`\`jsx\nimport { createPortal } from 'react-dom';\ncreatePortal(<Modal />, document.getElementById('modal-root'));\n\`\`\`\n\nМонтирует в другой DOM-узел, но события всплывают по **React-дереву** (не DOM-дереву).`, score: 4 },
       { name: 'React Context', level: '3', content: `Решает **prop drilling**. createContext → Provider (value) → useContext.\n\n**Проблема:** изменение value → ВСЕ подписчики ререндерятся. React.memo НЕ помогает (контекст обходит memo).\n\n**Решение:** разделить на отдельные контексты (UserContext, ThemeContext).`, score: 4.5 },
-      { name: 'Концепция SSR. Ограничения применения', level: '3', content: `Сервер рендерит HTML → браузер показывает сразу → **гидратация** (навешивает обработчики).\n\n**API:**\n• \`createRoot\` — CSR (пустой DOM)\n• \`hydrateRoot\` — SSR (DOM с контентом)\n• \`renderToString\` — синхронный (старый)\n• \`renderToPipeableStream\` — потоковый (React 18, Streaming SSR)\n\n**Плюсы:** SEO, быстрый FCP.\n**Минусы:** нет window/document, увеличенный TTFB, нагрузка на сервер.`, score: 3.5 },
+      { name: 'Концепция SSR. Ограничения применения', level: '3', content: `**CSR vs SSR**\n\nCSR (Client-Side Rendering) — браузер получает пустой HTML и JS-бандл, React строит DOM на клиенте. Пользователь видит белый экран пока JS не загрузится и не выполнится.\n\nSSR (Server-Side Rendering) — сервер запускает React, генерирует готовый HTML и отдаёт его. Браузер показывает контент сразу — ещё до загрузки JS.\n\n**Как работает SSR + гидратация:**\n\`\`\`\n1. Запрос → сервер рендерит компоненты в HTML-строку\n2. Браузер получает готовый HTML → показывает контент (FCP быстрый)\n3. JS-бандл загружается\n4. hydrateRoot() — React "оживляет" существующий DOM:\n   привязывает обработчики событий, восстанавливает state\n5. Страница становится интерактивной (TTI)\n\`\`\`\nМежду шагами 2 и 5 — страница выглядит готовой, но не интерактивна. Это называется **hydration gap**.\n\n**React API:**\n\`\`\`js\n// Клиент CSR:\ncreatRoot(document.getElementById('root')).render(<App />);\n\n// Клиент SSR — гидратация существующего DOM:\nhydrateRoot(document.getElementById('root'), <App />);\n\n// Сервер (старый, синхронный — блокирует поток):\nconst html = renderToString(<App />);\n\n// Сервер (React 18, стриминг — отдаёт HTML по частям):\nconst { pipe } = renderToPipeableStream(<App />, {\n  onShellReady() { pipe(response); }\n});\n\`\`\`\n\n**Streaming SSR** — сервер начинает отдавать HTML не дожидаясь рендера всей страницы. Работает вместе с \`<Suspense>\`: тяжёлые части стримятся позже, оболочка приходит сразу.\n\n**Плюсы SSR:**\n• Быстрый FCP — пользователь видит контент без ожидания JS\n• SEO — поисковики получают готовый HTML\n• Работает без JS на клиенте\n\n**Ограничения и минусы:**\n• Нет \`window\`, \`document\`, \`localStorage\` на сервере — весь браузерный API недоступен\n• Увеличенный TTFB — сервер должен отрендерить прежде чем отдать\n• Нагрузка на сервер — React выполняется при каждом запросе\n• Гидратация должна дать идентичный DOM — расхождение сервер/клиент вызывает ошибки и полный перерендер\n• Сложнее деплой — нужен Node.js сервер, не просто CDN\n\n**Когда SSR оправдан:** публичные страницы с важным SEO, медленные устройства/соединения, контент-сайты. Для дашбордов за авторизацией — CSR проще и достаточно.`, score: 3.5 },
       { name: 'Form managers', level: '3', content: `**Контролируемые компоненты:** значение в state, React управляет вводом. Каждый keystroke → setState → ререндер.
 \`\`\`jsx
 const [value, setValue] = useState('');
@@ -650,8 +778,11 @@ const ref = useRef();
 // При сабмите: ref.current.value
 \`\`\`
 
-**React Hook Form** — неконтролируемые + \`register\`. Минимум ререндеров, высокая производительность.
-**Formik** — контролируемые. Каждое нажатие → ререндер. Хорош для простых форм.
+**React Hook Form** — работает через неконтролируемые компоненты + \`register\` (ref под капотом). React не знает о значениях полей до сабмита — ререндер только при ошибках валидации и сабмите. Производительный выбор для больших форм.
+
+**Formik** — контролируемые компоненты, значение каждого поля в state. Каждый keystroke → setState → ререндер всей формы. При 20+ полях начинает тормозить. Зато проще для понимания и работы с зависимыми полями.
+
+**Главное отличие:** RHF читает значения из DOM через refs в момент сабмита. Formik держит все значения в React state всё время — отсюда разница в производительности.
 
 **Валидация схемами:**
 \`\`\`js
@@ -664,57 +795,50 @@ const { register, handleSubmit, formState: { errors } } = useForm({
 });
 \`\`\`
 
-**React 19 — Server Actions:**
+**React 19 — Server Actions**
+
+Server Action — async-функция с директивой \`'use server'\`, которая выполняется на сервере. Вызывается с клиента как обычная функция, но запрос уходит на сервер автоматически — без fetch, без API-роута.
+
 \`\`\`jsx
-// Форма с серверным экшном — без useState/fetch
-<form action={async (formData) => {
-  'use server';
-  await saveUser(formData.get('name'));
-  revalidatePath('/users');
-}}>
-  <input name="name" /><button>Save</button>
-</form>
-\`\`\``, score: 3 },
-      { name: 'React паттерны. Compound components. render-props', level: '4', content: `**Compound Components:** набор связанных компонентов через Context.\n\`\`\`jsx\n<Table>\n  <Table.Header><Table.Cell>Name</Table.Cell></Table.Header>\n  <Table.Row><Table.Cell>Alice</Table.Cell></Table.Row>\n</Table>\n\`\`\`\n\n**Render-props:** компонент принимает функцию для рендеринга.\n\`\`\`jsx\n<MouseTracker render={({ x, y }) => <p>{x}, {y}</p>} />\n\`\`\`\n\nОба паттерна в основном заменены хуками (проще, без wrapper hell).`, score: 3.5 },
-      { name: 'Механизм Reconciliation', level: '4', content: `Алгоритм сравнения Virtual DOM деревьев O(n):\n\n1. **Разный тип** → уничтожить поддерево, создать заново (включая state)\n2. **Одинаковый тип DOM** → обновить атрибуты\n3. **Одинаковый тип компонента** → обновить props, вызвать render\n4. **Списки** → key для сопоставления\n\n**Одинаковый key** → warning + баги со стейтом. **index как key** → лишние ререндеры при вставке/удалении.`, score: 4 },
-      { name: 'Архитектура Fiber', level: '4', content: `**Fiber** — структура данных (узел) для каждого компонента. Хранит тип, props, state, ссылки на соседей.\n\n**Проблема до Fiber:** стековый рекурсивный обход — нельзя прервать, UI зависает.\n\n**Решение:** работа делится на маленькие units of work, можно прервать и возобновить.\n\n**useTransition** — помечает обновление как низкоприоритетное. React может прервать при срочном обновлении.\n\n**useDeferredValue** — аналог, но для значения. 
-        **1. Render фаза (reconciliation) — прерываемая:**
-Строит дерево Fiber
-Вычисляет изменения (diffing)
-Можно прервать и возобновить
-
-**2. Commit фаза — непрерываемая:**
-
-Применяет изменения к реальному DOM
-Вызывает useEffect, useLayoutEffect
-Нельзя прервать — DOM должен обновиться атомарно
-
-Именно поэтому функции в render фазе (например тело компонента) могут вызываться несколько раз — Fiber может перезапустить работу. Это причина почему в StrictMode React намеренно вызывает рендер дважды.`, score: 4 },
-      { name: 'Server components', level: '4', content: `Код остаётся на сервере, JS НЕ отправляется клиенту. Нет гидратации.\n\n**\`'use client'\`** — маркер клиентского компонента. Остальное — серверное по умолчанию.\n\n**RSC Payload:** серверные компоненты → готовая разметка, клиентские → ссылки из бандла.\n\n**Ограничения SC:** нет useState/useEffect, нет обработчиков событий, нет интерактивности.\n\n**Плюс:** тяжёлые библиотеки не попадают в бандл клиента. Прямой доступ к БД, файловой системе.
-
-**Server Actions (React 19 / Next.js 14+):**
-\`\`\`js
-// actions.ts
+// actions.ts (серверный код)
 'use server';
-export async function createUser(formData: FormData) {
-  await db.insert({ name: formData.get('name') });
-  revalidatePath('/users'); // инвалидировать кэш
+export async function saveUser(formData: FormData) {
+  await db.users.create({ name: formData.get('name') });
+  revalidatePath('/users'); // инвалидировать кэш Next.js
 }
 \`\`\`
+
 \`\`\`jsx
-// Серверный компонент — нет JS на клиенте
-<form action={createUser}>
+// Вариант 1 — нативная форма (работает даже без JS на клиенте):
+<form action={saveUser}>
   <input name="name" />
-  <button>Создать</button>
+  <button>Save</button>
 </form>
 
-// Или из клиентского компонента
-const [isPending, startTransition] = useTransition();
-startTransition(async () => { await createUser(formData); });
+// Вариант 2 — программный вызов:
+<button onClick={() => saveUser(formData)}>Save</button>
 \`\`\`
-- Выполняются на сервере, не попадают в бандл
-- Поддерживают optimistic updates через \`useOptimistic\`
-- Интегрируются с Suspense и streaming`, score: 4 },
+
+**useActionState** — отслеживает состояние Server Action (pending, error, result):
+\`\`\`jsx
+const [state, formAction, isPending] = useActionState(saveUser, null);
+
+<form action={formAction}>
+  <input name="name" />
+  <button disabled={isPending}>
+    {isPending ? 'Сохраняем...' : 'Save'}
+  </button>
+  {state?.error && <p>{state.error}</p>}
+</form>
+\`\`\`
+
+**Плюсы:** нет boilerplate с fetch/useState/loading, прогрессивное улучшение (форма работает без JS), серверный код не попадает в бандл клиента, типобезопасность end-to-end.
+
+**Ограничения:** только в серверных окружениях (Next.js App Router, Remix и т.д.). В чистом React без фреймворка — не работает.`, score: 3 },
+      { name: 'React паттерны. Compound components. render-props', level: '4', content: `**Compound Components:** набор связанных компонентов через Context.\n\`\`\`jsx\n<Table>\n  <Table.Header><Table.Cell>Name</Table.Cell></Table.Header>\n  <Table.Row><Table.Cell>Alice</Table.Cell></Table.Row>\n</Table>\n\`\`\`\n\n**Render-props:** паттерн для переиспользования логики — компонент управляет данными/поведением, а потребитель сам решает как их рендерить.\n\`\`\`jsx\n// MouseTracker знает координаты, но не знает как их показать\nclass MouseTracker extends React.Component {\n  state = { x: 0, y: 0 };\n  handleMove = (e) => this.setState({ x: e.clientX, y: e.clientY });\n  render() {\n    return <div onMouseMove={this.handleMove}>{this.props.render(this.state)}</div>;\n  }\n}\n\n// Потребитель сам решает что рендерить с этими данными:\n<MouseTracker render={({ x, y }) => <p>Курсор: {x}, {y}</p>} />\n<MouseTracker render={({ x, y }) => <Avatar style={{ left: x, top: y }} />} />\n\`\`\`\nЗадача — разделить логику (что происходит) от представления (как выглядит). До хуков это был основной способ переиспользовать логику с состоянием.\n\nОба паттерна в основном заменены хуками (проще, без wrapper hell). Render-props → кастомный хук. Но иногда встречаются в библиотеках (react-table, Downshift).`, score: 3.5 },
+      { name: 'Механизм Reconciliation', level: '4', content: `**Что запускает reconciliation:**\nsetState, dispatch (useReducer), обновление контекста, ререндер родителя. React ставит компонент в очередь на перерендер — не выполняет сразу.\n\n**Batching (пакетирование обновлений):**\nReact 18 автоматически объединяет несколько setState в один ререндер — даже внутри setTimeout, fetch, промисов:\n\`\`\`js\n// Один ререндер, не три:\nsetTimeout(() => {\n  setA(1);\n  setB(2);\n  setC(3);\n}, 1000);\n\`\`\`\nДо React 18 batching работал только в обработчиках событий.\n\n**Work-in-progress tree (двойная буферизация):**\nReact держит два дерева: текущее (current) — то что видит пользователь, и work-in-progress — то что строится. Diffing идёт между ними. Когда всё готово — деревья меняются местами атомарно. Пользователь никогда не видит незавершённое состояние.\n\n**Почему O(n), а не O(n³):**\nНаивный diff любых двух деревьев — O(n³). React использует две эвристики которые делают это O(n):\n1. Элементы разного типа никогда не сравниваются — сразу снос и пересоздание\n2. key — подсказка React какой элемент списка соответствует какому\n\n**Bailout — пропуск поддерева:**\nЕсли React при обходе видит что props и state компонента не изменились — он пропускает всё поддерево целиком, не заходя в него:\n\`\`\`js\n// React.memo — bailout если props не изменились (поверхностное сравнение)\nconst Child = React.memo(({ value }) => <div>{value}</div>);\n\n// Нюанс: новая функция каждый ререндер = новая ссылка = memo бесполезен\n<Child onClick={() => doSomething()} /> // ❌\n<Child onClick={useCallback(() => doSomething(), [])} /> // ✅\n\`\`\`\n\n**Важный нюанс — ререндер ≠ обновление DOM:**\nРеакт может вызвать render-функцию компонента, посчитать VDOM и решить что реальный DOM менять не нужно — изменений нет. Ререндер дорог памятью (создание VDOM), но не обязательно дорог DOM-операциями.`, score: 4 },
+      { name: 'Архитектура Fiber', level: '4', content: `**Проблема до Fiber (React 15 и раньше):**\nReconciliation был синхронным рекурсивным обходом стека. Начав обход — нельзя остановиться. При большом дереве JS занимал main thread на десятки миллисекунд: анимации замерзали, ввод не отвечал.\n\n**Что такое Fiber:**\nFiber — это новый движок reconciliation (React 16+) и одновременно структура данных. Каждый компонент в дереве — это Fiber-узел:\n\`\`\`js\n// Упрощённо что хранит Fiber-узел:\n{\n  type,          // тип компонента или DOM-тег\n  props,         // текущие props\n  stateNode,     // DOM-узел или экземпляр класса\n  memoizedState, // state хуков (связный список)\n  child,         // первый дочерний Fiber\n  sibling,       // следующий сосед\n  return,        // родительский Fiber\n  flags,         // что нужно сделать: Update | Placement | Deletion\n}\n\`\`\`\nВместо рекурсии — связный список. Обход можно остановить после любого узла и продолжить позже.\n\n**Две фазы работы:**\n\n**1. Render фаза — прерываемая:**\nReact обходит Fiber-дерево, вызывает render-функции, строит work-in-progress дерево, помечает узлы флагами (Update, Placement, Deletion). Эту работу можно прервать — браузер получит управление для обработки ввода или анимации — и возобновить позже.\nПоскольку фаза прерываемая, тело компонента может вызваться несколько раз за одно обновление. Именно поэтому рендер должен быть чистой функцией.\n\n**2. Commit фаза — непрерываемая:**\nReact берёт список изменений (effectList) и атомарно применяет к реальному DOM. Прерывать нельзя — пользователь не должен видеть промежуточное состояние.\nТри подфазы commit:\n• **Before mutation** — вызываются getSnapshotBeforeUpdate\n• **Mutation** — применяются DOM-изменения\n• **Layout** — вызывается useLayoutEffect (синхронно после DOM, до отрисовки)\n\nПосле этого браузер рисует экран, затем асинхронно вызывается useEffect.\n\n**Приоритеты и Concurrent Mode:**\nFiber позволяет назначать приоритет обновлениям. Срочное (ввод пользователя) → выполняется немедленно. Несрочное → можно отложить:\n\`\`\`js\n// useTransition — помечает обновление как несрочное\nconst [isPending, startTransition] = useTransition();\nstartTransition(() => setFilter(value)); // React может прервать при вводе\n\n// useDeferredValue — дерево с этим значением рендерится с низким приоритетом\nconst deferred = useDeferredValue(heavyValue);\n\`\`\`\n\n**StrictMode вызывает рендер дважды** именно из-за Fiber: проверяет что компонент идемпотентен (два вызова дают одинаковый результат). В продакшне — один раз.`, score: 4 },
+      { name: 'Server components', level: '4', content: `**Проблема которую решают RSC:**\nПри SSR компонент рендерится на сервере в HTML, но его JS-код всё равно попадает в бандл — для гидратации. Тяжёлые зависимости (markdown-парсер, date библиотека) едут клиенту даже если там они не нужны.\n\nServer Components (RSC) — компоненты которые выполняются только на сервере. Их JS в бандл не попадает вообще. Нет гидратации — нечего гидратировать.\n\n**Как работает:**\n\`\`\`jsx\n// app/page.tsx — Server Component по умолчанию в Next.js App Router\nexport default async function Page() {\n  const posts = await db.posts.findMany(); // прямой доступ к БД — без fetch!\n  return <PostList posts={posts} />;\n}\n\`\`\`\nКомпонент async — можно await прямо в теле. Данные фетчатся на сервере, клиент получает готовый результат.\n\n**Граница server/client — директива \`'use client'\`:**\n\`\`\`jsx\n// ❌ Без директивы — серверный, нет интерактивности\nexport function StaticCard({ title }) {\n  return <div>{title}</div>;\n}\n\n// ✅ С директивой — клиентский, полный React\n'use client';\nexport function LikeButton({ postId }) {\n  const [liked, setLiked] = useState(false);\n  return <button onClick={() => setLiked(true)}>Like</button>;\n}\n\`\`\`\n\`'use client'\` — граница бандла. Всё что импортирует клиентский компонент тоже попадает в бандл.\n\n**Что можно/нельзя:**\n\`\`\`\nServer Component:         Client Component:\n✅ async/await            ✅ useState, useEffect\n✅ прямой доступ к БД     ✅ обработчики событий\n✅ env переменные          ✅ браузерные API\n✅ fs, секретные ключи     ✅ useContext\n❌ useState/useEffect      ❌ прямой доступ к БД\n❌ обработчики событий     ❌ async компонент\n❌ браузерные API\n\`\`\`\n\n**RSC Payload — что летит по сети:**\nСервер отдаёт не HTML, а специальный формат (JSON-подобный). Клиентские компоненты — ссылки на JS в бандле. Серверные — готовый результат рендера. React на клиенте собирает из этого дерево.\n\n**Composition pattern — как совмещать:**\n\`\`\`jsx\n// Серверный компонент передаёт children клиентскому\n// Важно: children рендерится на сервере, не попадает в бандл клиента\nasync function Page() {\n  const data = await fetchData();\n  return (\n    <ClientShell> {/* 'use client' */}\n      <ServerContent data={data} /> {/* остаётся серверным */}\n    </ClientShell>\n  );\n}\n\`\`\`\n\n**RSC vs SSR — разница:**\nSSR — рендер на сервере + гидратация на клиенте, JS едет клиенту. RSC — рендер на сервере, JS не едет, нет гидратации. Они совместимы: страница может использовать и SSR и RSC одновременно.`, score: 4 },
     ],
   },
 ];
