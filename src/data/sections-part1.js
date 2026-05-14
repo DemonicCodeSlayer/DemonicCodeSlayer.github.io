@@ -407,14 +407,14 @@ this внутри стрелочной функции **есть** и работ
 **Promotion:** объект пережил 2 сборки в Young → Old
 
 **Оптимизации пауз GC в V8:**
-• Incremental Marking:
-Фаза Mark в Mark-Sweep-Compact — самая долгая, потому что нужно обойти весь граф объектов от корней. Вместо того чтобы делать это за один раз и блокировать основной поток на десятки-сотни миллисекунд, V8 разбивает обход на маленькие порции по 5-10мс. Между порциями выполняется JavaScript. Проблема — пока мы помечали объекты порциями, JS-код мог создать новые ссылки или удалить старые. Для этого используется write barrier — при каждой записи свойства V8 отмечает изменённые объекты и перепроверяет их при следующей порции.
-• Concurrent Marking/Sweeping/Compacting:
-Фазы Sweep и Compact выполняются в отдельных потоках (worker threads), параллельно с основным JS-потоком. Основной поток продолжает выполнять JS, а воркеры в это время освобождают и уплотняют память. Начиная с 2018 года V8 также делает concurrent marking — часть фазы Mark тоже выполняется в параллельных потоках, а основной поток только финализирует результат.
-• Lazy Sweeping:
-После фазы Mark движок знает какие объекты мёртвые, но не торопится их очищать. Sweep происходит лениво — только когда нужно выделить новую память и текущая страница заполнена. Если памяти хватает — sweep откладывается. Это размазывает стоимость очистки во времени.
-Итого эффект:
-Без оптимизаций пауза Major GC могла занимать 100-500мс (заметный фриз UI). С оптимизациями — основной поток блокируется на 1-5мс за раз, остальное параллельно или инкрементально.`,
+
+**• Incremental Marking** — фаза Mark разбита на порции по 5-10мс, между которыми выполняется JS. Без этого обход всего графа объектов блокировал поток на десятки-сотни мс. Побочный эффект: пока идут порции, JS может изменить ссылки. Решение — **write barrier**: при каждой записи свойства V8 помечает объект «изменён» и перепроверяет его в следующей порции.
+
+**• Concurrent Marking/Sweeping/Compacting** — фазы Sweep и Compact выполняются в отдельных worker-потоках параллельно с JS. С 2018 года часть фазы Mark тоже идёт параллельно, основной поток только финализирует результат.
+
+**• Lazy Sweeping** — после Mark движок знает мёртвые объекты, но не торопится очищать. Sweep происходит лениво — только когда нужно выделить новую память и страница заполнена. Стоимость очистки размазывается во времени.
+
+**Итог:** без оптимизаций пауза Major GC — 100-500мс (заметный фриз). С оптимизациями — основной поток блокируется на 1-5мс, остальное параллельно.`,
         score: 2.5,
       },
       {
@@ -683,7 +683,7 @@ seen.has(obj); // true
 **Recorder:** запись пользовательских сценариев → воспроизведение → экспорт в Playwright/Puppeteer скрипты.` },
       { name: 'breakpoints', level: '2', content: `**Типы breakpoints в DevTools:**\n\n• **Line breakpoint** — пауза на конкретной строке кода\n• **Conditional breakpoint** — срабатывает при условии (\`user.id === 5\`)\n• **DOM breakpoint** — при изменении DOM-узла (subtree, attributes, node removal)\n• **XHR/Fetch breakpoint** — при запросе к определённому URL\n• **Event listener breakpoint** — при определённом событии (click, scroll)\n• **Exception breakpoint** — при выбросе исключения\n\n**Отладка:** Step over (F10), Step into (F11), Step out (Shift+F11), Resume (F8).\n\n**Watch expressions** — отслеживание переменных. **Call Stack** — стек вызовов. **Scope** — текущие переменные.` },
       { name: 'Всплытие и погружение событий', level: '2', content: `**3 фазы события:**\n1. **Capturing (погружение)** — от window вниз к целевому элементу\n2. **Target** — событие на целевом элементе\n3. **Bubbling (всплытие)** — от целевого элемента вверх к window\n\n\`\`\`js\nel.addEventListener('click', handler, true);  // capturing\nel.addEventListener('click', handler, false); // bubbling (по умолчанию)\n\`\`\`\n\n**event.stopPropagation()** — останавливает всплытие/погружение\n**event.stopImmediatePropagation()** — + отменяет остальные обработчики на этом элементе\n**event.preventDefault()** — отменяет действие по умолчанию (НЕ останавливает всплытие)\n\n**Делегирование событий:** вешаем один обработчик на родителя, проверяем \`event.target\`.` },
-      { name: 'Основные браузерные события', level: '2', content: `**Mouse:** click, dblclick, mousedown, mouseup, mousemove, mouseenter, mouseleave, contextmenu\n**Keyboard:** keydown, keyup, keypress (deprecated)\n**Form:** submit, input, change, focus, blur\n**Document:** DOMContentLoaded, load, beforeunload, unload\n**Scroll/Resize:** scroll, resize\n**Clipboard:** copy, paste, cut\n**Touch:** touchstart, touchmove, touchend\n**Drag:** dragstart, drag, dragend, dragover, drop\n\n**DOMContentLoaded** — DOM готов, стили/картинки могут ещё грузиться\n**load** — всё загружено (включая картинки, стили)\n\n**Passive listeners:** \`{ passive: true }\` — обработчик не вызовет preventDefault(), браузер может оптимизировать скролл.` },
+      { name: 'Основные браузерные события', level: '2', content: `**Мышь:**\n\`\`\`\nclick       — клик (mousedown + mouseup на одном элементе)\ndblclick    — двойной клик\nmousedown   — кнопка нажата\nmouseup     — кнопка отпущена\nmousemove   — движение мыши\nmouseenter  — вошла на элемент (не всплывает, не триггерится на детях)\nmouseleave  — вышла с элемента (не всплывает)\nmouseover   — вошла на элемент или дочерний (всплывает)\nmouseout    — вышла с элемента или дочернего (всплывает)\ncontextmenu — правый клик\nwheel       — колесо мыши\n\`\`\`\nmouseenter/mouseleave — для одного элемента, не реагируют на детей. mouseover/mouseout — всплывают, срабатывают при переходе между дочерними.\n\n**Клавиатура:**\n\`\`\`\nkeydown   — клавиша нажата (повторяется при удержании)\nkeyup     — клавиша отпущена\nkeypress  — устарел, не использовать\n\`\`\`\n\n**Форма:**\n\`\`\`\nsubmit    — отправка формы\nreset     — сброс формы\nchange    — значение изменено И потерян фокус (input, select, checkbox)\ninput     — значение изменяется в реальном времени (каждый символ)\nfocus     — элемент получил фокус (не всплывает)\nblur      — элемент потерял фокус (не всплывает)\nfocusin   — как focus, но всплывает\nfocusout  — как blur, но всплывает\n\`\`\`\n\n**Документ и окно:**\n\`\`\`\nDOMContentLoaded — DOM построен, стили/картинки могут не загрузиться\nload             — всё загружено (стили, картинки, шрифты)\nbeforeunload     — перед закрытием (можно показать предупреждение)\nunload           — страница закрывается\nresize           — изменение размера окна\nscroll           — прокрутка\nvisibilitychange — вкладка стала активной/неактивной\n\`\`\`\n\n**Drag & Drop:**\n\`\`\`\ndragstart  — начало перетаскивания\ndrag       — во время перетаскивания\ndragend    — конец перетаскивания\ndragenter  — элемент вошёл в зону drop\ndragleave  — элемент вышел из зоны drop\ndragover   — над зоной drop (нужен preventDefault() чтобы drop сработал)\ndrop       — элемент брошен\n\`\`\`\n\n**Touch (мобильные):**\n\`\`\`\ntouchstart  — палец коснулся экрана\ntouchmove   — палец движется\ntouchend    — палец убран\ntouchcancel — касание прервано (звонок, уведомление)\n\`\`\`\n\n**Буфер обмена:**\n\`\`\`\ncopy   — копирование\ncut    — вырезание\npaste  — вставка\n\`\`\`\n\n**Медиа:**\n\`\`\`\nplay          — воспроизведение началось\npause         — пауза\nended         — воспроизведение закончено\ntimeupdate    — текущее время изменилось\nvolumechange  — громкость изменилась\nloadeddata    — данные загружены\n\`\`\`\n\n**Анимации и переходы:**\n\`\`\`\nanimationstart  — CSS-анимация началась\nanimationend    — CSS-анимация закончилась\ntransitionend   — CSS-transition закончился\n\`\`\`\n\n**Intersection Observer** — не событие, но ключевой API. Срабатывает когда элемент появляется или исчезает из viewport. Используется для lazy-loading, infinite scroll, анимаций при скролле:\n\`\`\`js\nconst observer = new IntersectionObserver((entries) => {\n  entries.forEach(entry => {\n    if (entry.isIntersecting) {\n      loadImage(entry.target);\n      observer.unobserve(entry.target); // перестать следить\n    }\n  });\n}, { threshold: 0.1 }); // 0.1 = срабатывает когда 10% элемента видно\n\nobserver.observe(document.querySelector('.lazy-img'));\n\`\`\`\n\n**Passive listeners** — подсказка браузеру что обработчик не вызовет preventDefault(). Браузер не ждёт выполнения обработчика перед прокруткой — скролл плавнее:\n\`\`\`js\ndocument.addEventListener('scroll', handler, { passive: true });\ndocument.addEventListener('touchmove', handler, { passive: true });\n\`\`\`` },
       { name: 'Что такое DOM. JS Методы работы с узлами', level: '2', content: `**DOM (Document Object Model)** — древовидное представление HTML-документа. Каждый HTML-тег — узел (node).\n\n**Поиск:**\n\`\`\`js\ndocument.getElementById('id')\ndocument.querySelector('.class')      // первый\ndocument.querySelectorAll('.class')   // все (статическая коллекция)\ndocument.getElementsByClassName()     // живая коллекция\n\`\`\`\n\n**Создание/модификация:**\n\`\`\`js\ndocument.createElement('div')\nelement.append(child)      // в конец\nelement.prepend(child)     // в начало\nelement.before(sibling)    // перед\nelement.after(sibling)     // после\nelement.remove()           // удалить\nelement.cloneNode(true)    // глубокое клонирование\n\`\`\`\n\n**Атрибуты:** getAttribute, setAttribute, removeAttribute, dataset (data-*).\n**Классы:** classList.add, remove, toggle, contains.
 
 **DocumentFragment** — лёгкий узел вне DOM. Добавляй элементы пакетно, потом вставь один раз → один reflow:
@@ -713,15 +713,573 @@ observer.disconnect();
 Используется в: React DevTools, rich text редакторах, analytics трекерах.` },
       { name: 'iframe', level: '3', content: `**iframe** — встраивает другую HTML-страницу внутрь текущей.\n\n\`\`\`html\n<iframe src="https://example.com" sandbox="allow-scripts"></iframe>\n\`\`\`\n\n**Безопасность:**\n• **sandbox** — ограничивает возможности: allow-scripts, allow-same-origin, allow-forms, allow-popups\n• **Same-Origin Policy** — доступ к содержимому iframe только с того же домена\n• **postMessage** — безопасное общение между окнами разных доменов\n\n\`\`\`js\n// Родитель → iframe\niframe.contentWindow.postMessage(data, 'https://target.com');\n\n// iframe → родитель\nwindow.parent.postMessage(data, 'https://parent.com');\n\n// Приём\nwindow.addEventListener('message', (e) => {\n  if (e.origin !== 'https://trusted.com') return;\n  console.log(e.data);\n});\n\`\`\`\n\n**X-Frame-Options** — заголовок, запрещающий встраивание сайта в iframe.` },
       { name: 'Отладка WebSocket в браузере', level: '3', content: `В DevTools → Network → вкладка **WS** (WebSocket):\n• Видны все WebSocket-соединения\n• **Messages** — отправленные (зелёные) и полученные (красные) сообщения\n• **Headers** — заголовки handshake (Upgrade: websocket)\n• **Timing** — время установки соединения\n\nМожно фильтровать по содержимому сообщений, видеть бинарные данные. Полезно для дебага real-time приложений (чаты, уведомления, торговые платформы).` },
-      { name: 'Базовое понимание cookies', level: '3', content: `**Cookies** — маленькие текстовые данные, отправляемые с каждым HTTP-запросом.\n\n\`\`\`js\ndocument.cookie = "name=value; max-age=3600; path=/; secure; samesite=strict";\n\`\`\`\n\n**Атрибуты:**\n• **max-age / expires** — время жизни\n• **path** — для какого пути доступна\n• **domain** — для какого домена\n• **secure** — только по HTTPS\n• **httpOnly** — недоступна из JS (защита от XSS)\n• **SameSite** — strict/lax/none (защита от CSRF)\n\n**Ограничения:** ~4KB на cookie, ~20 cookies на домен.\n\n**Типы:** Session cookies (без max-age, до закрытия браузера), Persistent (с max-age), Third-party (с другого домена — для трекинга).` },
-      { name: 'localStorage и sessionStorage', level: '3', content: `**localStorage:** данные сохраняются навсегда (до явного удаления)\n**sessionStorage:** данные живут до закрытия вкладки\n\n\`\`\`js\nlocalStorage.setItem('key', JSON.stringify(data));\nconst data = JSON.parse(localStorage.getItem('key'));\nlocalStorage.removeItem('key');\nlocalStorage.clear();\n\`\`\`\n\n**Ограничения:** ~5-10MB, только строки, синхронный API (может блокировать).\n\n**Отличия от cookies:**\n• Не отправляются на сервер с каждым запросом\n• Больше объём (5MB vs 4KB)\n• Нет атрибутов безопасности (httpOnly, secure)\n\n**Событие storage:** срабатывает в ДРУГИХ вкладках при изменении localStorage. Можно использовать для синхронизации между вкладками.` },
-      { name: 'Базовое понимание Selection и Range', level: '3', content: `**Range** — объект, представляющий фрагмент документа (от точки A до точки B).\n\n\`\`\`js\nconst range = document.createRange();\nrange.setStart(node, offset);\nrange.setEnd(node, offset);\nrange.selectNodeContents(element);\n\`\`\`\n\n**Selection** — то, что выделил пользователь.\n\n\`\`\`js\nconst selection = window.getSelection();\nselection.toString();        // текст выделения\nselection.getRangeAt(0);     // Range объект\nselection.removeAllRanges(); // снять выделение\nselection.addRange(range);   // программно выделить\n\`\`\`\n\nПрименение: редакторы текста, подсветка поиска, кастомные контекстные меню.` },
-      { name: 'Особенности работы с браузерными событиями', level: '3', content: `**Throttle** — не чаще чем раз в N мс (scroll, resize).\n**Debounce** — ждёт N мс после последнего вызова (input поиска).\n\n**Passive listeners:**\n\`\`\`js\nel.addEventListener('scroll', handler, { passive: true });\n\`\`\`\nОбещаем не вызывать preventDefault() → браузер оптимизирует скролл.\n\n**Event delegation:**\n\`\`\`js\ntable.addEventListener('click', (e) => {\n  const td = e.target.closest('td');\n  if (!td || !table.contains(td)) return;\n  highlight(td);\n});\n\`\`\`\n\n**Custom Events:**\n\`\`\`js\nconst event = new CustomEvent('myEvent', { detail: { id: 1 }, bubbles: true });\nelement.dispatchEvent(event);\n\`\`\`\n\n**once: true** — обработчик вызовется один раз и удалится автоматически.` },
+      { name: 'Базовое понимание cookies', level: '3', content: `**Cookie** — небольшой фрагмент данных (до ~4 KB), который сервер устанавливает в браузере через заголовок Set-Cookie. Браузер автоматически прикладывает cookie к каждому HTTP-запросу к тому же домену через заголовок Cookie.
+
+Именно поэтому cookies используют для аутентификации — сервер один раз установил session-id, и браузер сам носит его при каждом запросе, не требуя ничего от JS-кода.
+
+**Как это выглядит на уровне HTTP:**
+\`\`\`
+← Set-Cookie: session=abc123; HttpOnly; Secure; SameSite=Lax; Max-Age=86400
+→ Cookie: session=abc123
+\`\`\`
+
+**Установка через JS:**
+\`\`\`js
+// Записать
+document.cookie = "theme=dark; max-age=2592000; path=/";
+
+// Прочитать — возвращает ВСЕ cookie строкой через ";"
+document.cookie; // "theme=dark; lang=ru"
+
+// Удалить — установить max-age=0 или expires в прошлом
+document.cookie = "theme=; max-age=0; path=/";
+\`\`\`
+API намеренно неудобный — нет нативного getItem/removeItem. Обычно используют библиотеку js-cookie или пишут хелпер.
+
+**Атрибуты безопасности:**
+
+**HttpOnly** — cookie недоступна из JS (document.cookie её не видит). Защита от XSS.
+
+**Secure** — cookie отправляется только по HTTPS.
+
+**SameSite** — контролирует отправку cookie в кросс-сайтовых запросах:
+\`\`\`
+Strict — не отправляется ни в каких кросс-сайтовых запросах
+Lax    — не отправляется при CSRF-запросах (POST, img, iframe),
+         но отправляется при top-level навигации. Дефолт в современных браузерах.
+None   — отправляется всегда, требует Secure. Для third-party (виджеты, аналитика).
+\`\`\`
+
+**path и domain:**
+\`\`\`
+path=/admin   — cookie видна только для /admin и его подпутей
+domain=.example.com — cookie доступна для всех поддоменов (sub.example.com, api.example.com)
+\`\`\`
+Без явного domain — cookie принадлежит только точному домену, поддомены не видят.
+
+**max-age vs expires:**
+\`\`\`js
+max-age=3600       // секунды от текущего момента (предпочтительнее)
+expires=Wed, 21 Oct 2026 07:28:00 GMT  // конкретная дата (зависит от часов клиента)
+\`\`\`
+Без обоих — session cookie: живёт до закрытия браузера (не вкладки).
+
+**Типы cookies:**
+\`\`\`
+Session cookie    — без max-age/expires, удаляется при закрытии браузера
+Persistent cookie — с max-age/expires, хранится до истечения срока
+First-party       — домен совпадает с текущим сайтом
+Third-party       — домен отличается (пиксели аналитики, рекламные трекеры)
+                    Браузеры блокируют по умолчанию (Safari ITP, Chrome Privacy Sandbox)
+\`\`\`
+
+**Ограничения:**
+• ~4 KB на одну cookie
+• ~50 cookies на домен (в зависимости от браузера)
+• Отправляются с каждым запросом — не хранить большие данные (для этого localStorage)
+
+**Cookie vs localStorage:**
+\`\`\`
+Cookie         — автоматически летит на сервер, есть HttpOnly/Secure, 4 KB
+localStorage   — только JS, не уходит на сервер, нет HttpOnly, 5-10 MB
+\`\`\`
+Для аутентификации — cookie с HttpOnly. Для настроек UI — localStorage.` },
+      { name: 'localStorage и sessionStorage', level: '3', content: `**localStorage** — хранит данные без срока истечения, переживает закрытие браузера. Область видимости: домен + протокол (http и https — разные хранилища).
+
+**sessionStorage** — данные живут до закрытия вкладки. Уникально для каждой вкладки: две вкладки одного сайта — два разных sessionStorage. Дублируется при открытии вкладки через Ctrl+Click (копируется на момент открытия, дальше независимо).
+
+**API — синхронный (одинаковый для обоих):**
+\`\`\`js
+localStorage.setItem('key', JSON.stringify(value));
+const val = JSON.parse(localStorage.getItem('key')); // null если нет
+localStorage.removeItem('key');
+localStorage.clear();
+localStorage.length;
+localStorage.key(0); // ключ по индексу
+
+// sessionStorage — тот же интерфейс, другая область видимости
+sessionStorage.setItem('step', '2');
+sessionStorage.getItem('step'); // '2'
+\`\`\`
+
+**Нюансы:**
+• Хранит только строки — объекты нужно JSON.stringify/parse
+• getItem несуществующего ключа возвращает null, не undefined
+• Синхронный API — блокирует main thread при большом объёме данных
+• ~5 MB на домен (зависит от браузера, в некоторых 10 MB)
+• Недоступен в Web Workers и Service Workers (там — IndexedDB)
+• В режиме инкогнито очищается при закрытии окна (ведёт себя как sessionStorage)
+
+**Событие storage:**
+\`\`\`js
+window.addEventListener('storage', (e) => {
+  e.key;        // изменённый ключ (null при clear())
+  e.oldValue;
+  e.newValue;
+  e.url;        // страница, которая изменила
+  e.storageArea // localStorage или sessionStorage
+});
+\`\`\`
+Срабатывает только в других вкладках/окнах того же домена — не в той, что изменила. Используется для синхронизации состояния между вкладками.
+
+**localStorage vs sessionStorage vs cookie:**
+\`\`\`
+                localStorage  sessionStorage  cookie
+Срок жизни      бессрочно     до закрытия вк. задаётся явно
+Объём           ~5 MB         ~5 MB           ~4 KB
+Уходит на сервер нет          нет             да (каждый запрос)
+Доступ из JS    да            да              да (если нет HttpOnly)
+Вкладки         общий         изолирован      общий
+\`\`\`` },
+      { name: 'Базовое понимание Selection и Range', level: '3', content: `**Range** — объект, описывающий фрагмент DOM от стартовой до конечной точки. Точка = (node, offset), где offset для текстового узла — позиция символа, для элемента — индекс дочернего узла.
+
+\`\`\`js
+const range = document.createRange();
+
+range.setStart(textNode, 2);       // с 3-го символа текстового узла
+range.setEnd(textNode, 7);         // по 7-й
+range.selectNode(el);              // весь элемент включая тег
+range.selectNodeContents(el);      // только содержимое элемента
+range.collapse(true);              // схлопнуть в начало (false — в конец)
+
+range.toString();                  // текст внутри
+range.getBoundingClientRect();     // координаты для позиционирования тултипа
+range.cloneContents();             // DocumentFragment — копия без удаления
+range.extractContents();           // DocumentFragment — вырезает из DOM
+range.deleteContents();            // удаляет содержимое
+range.insertNode(node);            // вставить узел в начало range
+range.surroundContents(node);      // обернуть содержимое в node
+\`\`\`
+
+**Selection** — то что выделил пользователь; может содержать несколько Range (на практике браузеры поддерживают один).
+
+\`\`\`js
+const sel = window.getSelection();
+
+sel.rangeCount;           // количество Range (обычно 0 или 1)
+sel.getRangeAt(0);        // получить Range по индексу
+sel.toString();           // выделенный текст
+sel.isCollapsed;          // true если курсор без выделения (каретка)
+sel.anchorNode;           // узел где началось выделение
+sel.anchorOffset;         // смещение в anchorNode
+sel.focusNode;            // узел где закончилось выделение
+sel.focusOffset;
+
+sel.removeAllRanges();    // снять выделение
+sel.addRange(range);      // программно выделить
+sel.collapse(node, offset); // переместить каретку
+sel.selectAllChildren(el);  // выделить всё содержимое элемента
+\`\`\`
+
+**anchor vs focus:** anchor — где пользователь нажал мышь, focus — где отпустил. При выделении снизу вверх focus будет раньше anchor в DOM.
+
+**Типичные задачи:**
+\`\`\`js
+// Получить координаты выделения (для тултипа форматирования)
+const rect = sel.getRangeAt(0).getBoundingClientRect();
+
+// Программно выделить текст в элементе
+const range = document.createRange();
+range.selectNodeContents(document.getElementById('title'));
+sel.removeAllRanges();
+sel.addRange(range);
+
+// Вставить HTML в позицию курсора (contenteditable)
+const range = sel.getRangeAt(0);
+range.deleteContents();
+range.insertNode(document.createTextNode('вставленный текст'));
+\`\`\`
+
+**Применение:** rich-text редакторы (Slate, TipTap), подсветка найденного текста, кастомные контекстные меню по выделению, аннотации.` },
+      { name: 'Особенности работы с браузерными событиями', level: '3', content: `**Throttle** — не чаще чем раз в N мс (scroll, resize).\n**Debounce** — ждёт N мс после последнего вызова (input поиска).\n\n**Опции addEventListener:**\n\n**once** — обработчик срабатывает один раз и автоматически удаляется:\n\`\`\`js\nbutton.addEventListener('click', handler, { once: true });\n\`\`\`\n\n**passive** — обещаем браузеру что не вызовем preventDefault(). Браузер не ждёт выполнения обработчика перед прокруткой → плавный скролл:\n\`\`\`js\ndocument.addEventListener('scroll', handler, { passive: true });\ndocument.addEventListener('touchmove', handler, { passive: true });\n\`\`\`\nВажно для scroll/touchmove — без passive браузер каждый раз ждёт, не вызван ли preventDefault(), и тормозит прокрутку.\n\n**capture** — обработчик на фазе погружения (по умолчанию false — всплытие):\n\`\`\`js\nel.addEventListener('click', handler, { capture: true });\n// или сокращённо:\nel.addEventListener('click', handler, true);\n\`\`\`\n\n**Удаление обработчика — нужна та же ссылка на функцию:**\n\`\`\`js\n// ❌ Не работает — каждый раз новая функция:\nel.addEventListener('click', () => handler());\nel.removeEventListener('click', () => handler());\n\n// ✅ Работает — одна ссылка:\nconst fn = () => handler();\nel.addEventListener('click', fn);\nel.removeEventListener('click', fn);\n\`\`\`\nТа же проблема с методами класса — this.handler каждый раз одна ссылка, а () => this.handler() — нет.\n\n**Делегирование событий** — один обработчик на родителе вместо N обработчиков на детях. Работает благодаря всплытию:\n\`\`\`js\n// Плохо — 1000 обработчиков:\nitems.forEach(item => item.addEventListener('click', handler));\n\n// Хорошо — один обработчик:\nlist.addEventListener('click', (e) => {\n  const item = e.target.closest('.item');\n  if (!item || !list.contains(item)) return; // защита от кликов вне .item\n  handler(item);\n});\n\`\`\`\nclosest() поднимается по DOM вверх — работает даже если кликнули на дочерний элемент внутри .item. contains() защищает от случая когда closest нашёл элемент за пределами контейнера.\n\n**Custom Events:**\n\`\`\`js\nconst event = new CustomEvent('myEvent', { detail: { id: 1 }, bubbles: true });\nelement.dispatchEvent(event);\n\`\`\`` },
       { name: 'Живые коллекции, методы обработки и преобразования в массив', level: '3', content: `**Живая коллекция** — автоматически обновляется при изменении DOM:\n\`\`\`js\nconst divs = document.getElementsByTagName('div'); // живая\n// Добавили div → divs.length увеличится\n\`\`\`\n\n**Статическая коллекция** — снимок на момент вызова:\n\`\`\`js\nconst divs = document.querySelectorAll('div'); // статическая\n// Добавили div → divs.length НЕ изменится\n\`\`\`\n\n**Преобразование в массив:**\n\`\`\`js\nArray.from(collection)\n[...collection]\nArray.prototype.slice.call(collection)\n\`\`\`\n\nЖивые: getElementsByClassName, getElementsByTagName, children\nСтатические: querySelectorAll` },
-      { name: 'Service workers', level: '4', content: `**Service Worker** — скрипт, работающий в фоне, отдельно от страницы.\n\n\`\`\`js\nnavigator.serviceWorker.register('/sw.js');\n\n// sw.js\nself.addEventListener('install', (e) => {\n  e.waitUntil(caches.open('v1').then(c => c.addAll(['/index.html', '/app.js'])));\n});\n\nself.addEventListener('fetch', (e) => {\n  e.respondWith(\n    caches.match(e.request).then(r => r || fetch(e.request))\n  );\n});\n\`\`\`\n\n**Возможности:** кэширование (офлайн), push-уведомления, фоновая синхронизация.\n**Ограничения:** только HTTPS, нет доступа к DOM, асинхронный API.` },
-      { name: 'Web-workers', level: '4', content: `**Web Worker** — выполнение JS в отдельном потоке.\n\n\`\`\`js\n// main.js\nconst worker = new Worker('worker.js');\nworker.postMessage({ data: bigArray });\nworker.onmessage = (e) => console.log(e.data);\n\n// worker.js\nself.onmessage = (e) => {\n  const result = heavyComputation(e.data);\n  self.postMessage(result);\n};\n\`\`\`\n\n**Ограничения:** нет доступа к DOM, window, document. Общение только через postMessage (сериализация).\n\n**SharedWorker** — один воркер на несколько вкладок.\n**Transferable Objects** — передача данных без копирования (ArrayBuffer).` },
-      { name: 'Как веб-приложение превратить в PWA', level: '4', content: `**PWA (Progressive Web App)** — веб-приложение с нативными возможностями.\n\n**3 требования:**\n1. **HTTPS** — обязательно\n2. **Service Worker** — кэширование, офлайн\n3. **Web App Manifest** — метаданные приложения\n\n\`\`\`json\n// manifest.json\n{\n  "name": "My App",\n  "short_name": "App",\n  "start_url": "/",\n  "display": "standalone",\n  "theme_color": "#000",\n  "icons": [{ "src": "icon.png", "sizes": "192x192" }]\n}\n\`\`\`\n\n**Возможности:** установка на домашний экран, push-уведомления, офлайн-работа, фоновая синхронизация.\n\n**Стратегии кэширования:** Cache First, Network First, Stale While Revalidate.` },
-      { name: 'WebComponents, ShadowDOM, Custom Elements', level: '4', content: `**Custom Elements:**\n\`\`\`js\nclass MyButton extends HTMLElement {\n  connectedCallback() { this.innerHTML = '<button>Click</button>'; }\n}\ncustomElements.define('my-button', MyButton);\n\`\`\`\n\n**Shadow DOM** — инкапсулированное DOM-дерево, изолированное от внешних стилей:\n\`\`\`js\nconst shadow = this.attachShadow({ mode: 'open' });\nshadow.innerHTML = '<style>p { color: red; }</style><p>Isolated</p>';\n\`\`\`\n\n**HTML Templates:**\n\`\`\`html\n<template id="tmpl"><p>Reusable content</p></template>\n\`\`\`\n\`\`\`js\nconst tmpl = document.getElementById('tmpl');\nconst clone = tmpl.content.cloneNode(true);\nshadow.appendChild(clone);\n\`\`\`\n\n**Slots** — точки вставки контента извне в Shadow DOM.` },
+      { name: 'Service workers', level: '4', content: `**Service Worker** — JS скрипт который:
+• Работает в отдельном потоке (не блокирует UI)
+• Является прокси между браузером и сетью
+• Живёт дольше страницы — продолжает работать когда вкладка закрыта
+• Работает только на HTTPS (или localhost)
+• Нет доступа к DOM
+
+**Регистрация:**
+\`\`\`js
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(reg => console.log('SW зарегистрирован', reg))
+    .catch(err => console.log('Ошибка', err));
+}
+\`\`\`
+
+**Полный жизненный цикл:**
+\`\`\`
+installing → выполняется install (кэширование ассетов)
+waiting    → установка прошла, ждёт пока закроются вкладки со старым SW
+activating → выполняется activate (чистка старых кэшей)
+activated  → контролирует страницы, слушает fetch/push
+redundant  → заменён новой версией или сломался при установке
+\`\`\`
+
+**Почему появляется waiting:** браузер нашёл новый sw.js → запустил install у v2 → v2 завис в waiting, потому что старый v1 ещё контролирует открытые вкладки. F5 не помогает — перезагрузка не закрывает документ. Нужно закрыть все вкладки сайта или вызвать \`skipWaiting()\`.
+
+**Install** — загружают статику в кэш для офлайн. Если хоть один файл не загрузился — install падает, SW не активируется.
+
+**Activate** — удаляют кэши предыдущих версий (старый SW писал в \`'v1'\`, новый в \`'v2'\` — \`'v1'\` больше не нужен).
+
+**skipWaiting()** — пропустить фазу waiting, активироваться немедленно, выкинув старый SW.
+**clients.claim()** — забрать контроль над уже открытыми вкладками (без него они остаются у старого SW до следующей навигации даже после активации нового).
+**Связка skipWaiting() + clients.claim()** — мгновенное обновление без перезагрузки. Но риск: страница загруженная со старым SW внезапно начинает общаться с новым — если форматы кэша/API несовместимы, поломается. Поэтому многие команды вместо этой связки показывают баннер "обновите страницу".
+\`\`\`js
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open('v1').then(cache => cache.addAll(['/index.html', '/app.js']))
+  );
+  self.skipWaiting(); // активировать немедленно, не ждать закрытия вкладок
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== 'v1').map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim(); // взять контроль над всеми открытыми вкладками
+});
+\`\`\`
+
+**Стратегии кэширования:**
+
+**Cache First** — сначала кэш, потом сеть (для статики):
+\`\`\`js
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request).then(cached => cached || fetch(event.request))
+  );
+});
+\`\`\`
+
+**Network First** — сначала сеть, при ошибке кэш (для API):
+\`\`\`js
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  );
+});
+\`\`\`
+
+**Stale While Revalidate** — отдаём кэш сразу, обновляем в фоне:
+\`\`\`js
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.open('v1').then(cache =>
+      cache.match(event.request).then(cached => {
+        const fetchPromise = fetch(event.request).then(response => {
+          cache.put(event.request, response.clone());
+          return response;
+        });
+        return cached || fetchPromise;
+      })
+    )
+  );
+});
+\`\`\`
+
+**Push уведомления:**
+\`\`\`js
+Notification.requestPermission().then(permission => { /* подписываемся */ });
+
+self.addEventListener('push', (event) => {
+  const data = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(data.title, { body: data.body, icon: '/icon.png' })
+  );
+});
+\`\`\`
+
+**Background Sync** — откладывает запросы до появления сети:
+\`\`\`js
+navigator.serviceWorker.ready.then(sw => sw.sync.register('send-message'));
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'send-message') event.waitUntil(sendPendingMessages());
+});
+\`\`\`
+
+**Возможности:** кэширование, офлайн-режим, push-уведомления, background sync, перехват и модификация любых запросов.` },
+      { name: 'Web-workers', level: '4', content: `**Web Worker** — запускает JS в отдельном потоке, не блокируя main thread и UI. Нет доступа к DOM, window, document — только вычисления и сеть (fetch).
+
+**Когда использовать:** тяжёлые вычисления (парсинг, шифрование, обработка изображений, сортировка больших массивов) — всё что вешает интерфейс дольше ~16ms.
+
+**Создание и общение через postMessage:**
+\`\`\`js
+// main.js
+const worker = new Worker('./worker.js');
+
+worker.postMessage({ type: 'compute', data: bigArray }); // отправить
+
+worker.onmessage = (e) => console.log('результат:', e.data);
+worker.onerror = (e) => console.error(e.message);
+
+worker.terminate(); // убить воркер
+\`\`\`
+\`\`\`js
+// worker.js
+self.onmessage = (e) => {
+  const result = heavyComputation(e.data.data);
+  self.postMessage(result); // отправить обратно
+};
+\`\`\`
+Данные передаются копированием (structured clone) — изменения в воркере не влияют на оригинал.
+
+**Transferable Objects** — передача без копирования, данные перемещаются (ArrayBuffer становится недоступен в отправителе):
+\`\`\`js
+const buffer = new ArrayBuffer(1024 * 1024 * 32); // 32MB
+worker.postMessage(buffer, [buffer]); // второй аргумент — список transferable
+// buffer здесь теперь пустой (detached)
+\`\`\`
+Критично для больших бинарных данных — без transfer копирование 32MB блокирует поток.
+
+**SharedWorker** — один экземпляр воркера на все вкладки одного домена. Общение через port:
+\`\`\`js
+// main.js
+const worker = new SharedWorker('./shared.js');
+worker.port.start();
+worker.port.postMessage('hello');
+worker.port.onmessage = (e) => console.log(e.data);
+\`\`\`
+\`\`\`js
+// shared.js
+self.onconnect = (e) => {
+  const port = e.ports[0];
+  port.onmessage = (e) => port.postMessage('ответ: ' + e.data);
+};
+\`\`\`
+Применение: общий кэш данных, синхронизация состояния между вкладками.
+
+**Inline Worker** — без отдельного файла:
+\`\`\`js
+const blob = new Blob([
+  \`self.onmessage = (e) => self.postMessage(e.data * 2);\`
+], { type: 'application/javascript' });
+const worker = new Worker(URL.createObjectURL(blob));
+\`\`\`
+
+**Worker vs Service Worker:**
+\`\`\`
+Web Worker      — вычисления в фоне, живёт пока страница открыта
+Service Worker  — прокси для сети, живёт независимо от страницы
+\`\`\`` },
+      { name: 'Как веб-приложение превратить в PWA', level: '4', content: `**PWA (Progressive Web App)** — веб-приложение которое ведёт себя как нативное: устанавливается на устройство, работает офлайн, получает push-уведомления.
+
+**3 обязательных компонента:**
+1. **HTTPS** — обязательно для SW и установки
+2. **Web App Manifest** — описывает приложение
+3. **Service Worker** — кэширование и офлайн
+
+**Web App Manifest:**
+\`\`\`json
+{
+  "name": "My Application",
+  "short_name": "MyApp",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
+\`\`\`
+\`\`\`html
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#000000">
+\`\`\`
+
+**display варианты:**
+\`\`\`
+standalone  — как нативное приложение, без браузерного UI (самый популярный)
+fullscreen  — полный экран без каких-либо элементов браузера
+minimal-ui  — минимальный браузерный UI (кнопки назад/вперёд)
+browser     — обычная вкладка браузера
+\`\`\`
+
+**Установка — кастомный баннер:**
+\`\`\`js
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  showInstallButton();
+});
+
+installButton.addEventListener('click', () => {
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') console.log('Установлено!');
+    deferredPrompt = null;
+  });
+});
+\`\`\`
+Браузер показывает баннер автоматически если: HTTPS + manifest с иконками + SW зарегистрирован + пользователь провёл достаточно времени на сайте.
+
+**Push уведомления:**
+\`\`\`js
+// 1. Запросить разрешение:
+const permission = await Notification.requestPermission();
+
+// 2. Подписаться (VAPID ключ генерируется на сервере):
+const subscription = await registration.pushManager.subscribe({
+  userVisibleOnly: true,
+  applicationServerKey: vapidPublicKey
+});
+// 3. Отправить subscription на сервер — он будет слать уведомления
+
+// 4. В SW получаем push:
+self.addEventListener('push', (event) => {
+  const data = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icon.png',
+      data: { url: data.url }
+    })
+  );
+});
+
+// 5. Клик по уведомлению:
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data.url));
+});
+\`\`\`
+
+**Проверка:** DevTools → Application (Manifest, Service Workers, Cache Storage). Lighthouse — аудит PWA.
+
+**Преимущества:** без App Store, автообновление, офлайн, push, индексируется поисковиками.
+
+**Ограничения:** iOS — push только с iOS 16.4+; нет доступа к некоторым нативным API (Bluetooth, NFC).` },
+      { name: 'WebComponents, ShadowDOM, Custom Elements', level: '4', content: `**Web Components** — набор браузерных API для создания переиспользуемых кастомных HTML элементов с инкапсулированной логикой и стилями. Без фреймворков — нативный браузер.
+
+Три составляющих: **Custom Elements**, **Shadow DOM**, **HTML Templates**.
+
+**Custom Elements — создание своих тегов:**
+\`\`\`js
+class MyButton extends HTMLElement {
+  constructor() {
+    super();
+    // инициализация — не трогать DOM здесь!
+  }
+
+  connectedCallback() {
+    // элемент добавлен в DOM — здесь работаем с DOM
+    this.render();
+  }
+
+  disconnectedCallback() {
+    // элемент удалён из DOM — чистим listeners, таймеры
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    this.render(); // атрибут изменился
+  }
+
+  static get observedAttributes() {
+    return ['color', 'disabled']; // какие атрибуты отслеживать
+  }
+
+  render() {
+    this.textContent = this.getAttribute('label') || 'Click';
+  }
+}
+
+// имя обязательно содержит дефис!
+customElements.define('my-button', MyButton);
+\`\`\`
+\`\`\`html
+<my-button color="red" label="Submit"></my-button>
+\`\`\`
+
+**Shadow DOM — изолированное DOM-дерево.** Стили снаружи не проникают внутрь и наоборот:
+\`\`\`js
+class MyCard extends HTMLElement {
+  connectedCallback() {
+    const shadow = this.attachShadow({ mode: 'open' });
+    shadow.innerHTML = \`
+      <style>
+        .card { border: 1px solid #ccc; padding: 16px; }
+        h2 { color: navy; } /* не утечёт наружу */
+      </style>
+      <div class="card">
+        <h2><slot name="title">Default Title</slot></h2>
+        <p><slot>Default content</slot></p>
+      </div>
+    \`;
+  }
+}
+customElements.define('my-card', MyCard);
+\`\`\`
+\`\`\`html
+<my-card>
+  <span slot="title">My Title</span>
+  <p>Card content</p>
+</my-card>
+\`\`\`
+
+**mode: open vs closed:**
+\`\`\`js
+this.attachShadow({ mode: 'open' });   // element.shadowRoot — доступен
+this.attachShadow({ mode: 'closed' }); // element.shadowRoot — null
+\`\`\`
+
+**Slots — проекция внешнего контента внутрь Shadow DOM:**
+Именованный slot — \`slot="name"\` для конкретного места.
+Дефолтный slot — без имени, принимает всё остальное.
+
+**HTML Templates — шаблоны которые парсятся, но не рендерятся сразу:**
+\`\`\`html
+<template id="card-template">
+  <div class="card">
+    <h2 class="title"></h2>
+  </div>
+</template>
+\`\`\`
+\`\`\`js
+const clone = document.getElementById('card-template').content.cloneNode(true);
+clone.querySelector('.title').textContent = this.getAttribute('title');
+this.attachShadow({ mode: 'open' }).appendChild(clone);
+\`\`\`
+
+**Изоляция Shadow DOM — не абсолютная.** Три способа "пробить" границу:
+
+1. **Наследуемые CSS-свойства** (\`color\`, \`font-family\`, \`line-height\` и др.) — проходят сквозь границу от shadow host. \`body { color: blue }\` → текст внутри тоже синий.
+2. **CSS-переменные** — намеренно проходят сквозь границу. Стандартный API кастомизации компонентов:
+\`\`\`css
+/* снаружи: */
+my-button { --btn-color: red; }
+/* внутри Shadow DOM: */
+button { color: var(--btn-color, blue); }
+\`\`\`
+3. **\`::part()\`** — компонент помечает элементы атрибутом \`part\`, снаружи стилизуют через псевдоэлемент:
+\`\`\`css
+/* внутри: <button part="btn"> */
+my-button::part(btn) { background: red; }
+\`\`\`
+
+**Жизненный цикл:** constructor → connectedCallback → attributeChangedCallback → disconnectedCallback
+
+**Web Components vs React:**
+\`\`\`
+                  Web Components     React
+Фреймворк         не нужен           нужен React
+Изоляция стилей   Shadow DOM         CSS Modules / styled
+Реактивность      вручную            автоматически
+Переиспользование любой фреймворк    только React
+\`\`\`
+
+**Когда использовать:** дизайн-системы для разных фреймворков, виджеты для встраивания на сторонние сайты.
+**Примеры:** GitHub UI, Google Material Web, YouTube.` },
     ],
   },
   {
